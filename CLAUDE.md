@@ -40,7 +40,7 @@ fork-profile:
   upstream-default-branch: main
   fork-owner: Zensqrl
   deploy-target: HACS custom repository (GitHub release on the fork)
-  version-scheme: plain increments, always >= upstream  # not local versions; HACS handling of `+` is unverified
+  version-scheme: <upstream base>.<fork counter> — e.g. 3.0.16.1
   overlay:
     - custom_components/garmin_connect/manifest.json   # the `requirements` line only
     - requirements.txt                                 # the `ha-garmin` line only
@@ -70,6 +70,10 @@ HACS installs only copy `custom_components/garmin_connect/` — it does not mana
 The **hassfest** job fails on this pin; its requirements check demands `name==version` and rejects direct references. That is the accepted cost of the fork — do not "fix" it by reverting to PyPI. It passing on an upstream PR branch is the proof the pin was left behind.
 
 The integration `version` in manifest.json is its own release number, independent of the library version, and is what HACS uses to offer an update.
+
+It carries a **fourth component** identifying the fork build on top of an upstream release: upstream `3.0.16` → `3.0.16.1`, `3.0.16.2`, … When upstream publishes a new version, take it as the new base and restart the counter at `.0` — `3.0.17.0`, `3.0.17.1`, …
+
+Do **not** use a PEP 440 local version here, as the library does. HACS compares with `awesomeversion`, which classifies `3.0.16+zs1` as SemVer and ignores build metadata for precedence, so `3.0.16+zs1 > 3.0.16` is **false** — the update would never be offered, silently. A SemVer prerelease (`3.0.16-zs1`) is worse, sorting below the base. The four-part form parses as SIMPLEVER and orders correctly, including across a base change (`3.0.17.0 > 3.0.16.3`).
 
 Don't do any of this by hand: the `garmin-release` skill ([.github/skills/garmin-release/SKILL.md](.github/skills/garmin-release/SKILL.md)) runs the whole pipeline — bump, commit, tag the library so Actions builds the wheel, repoint the pin, bump and tag the integration.
 
