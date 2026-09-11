@@ -32,6 +32,7 @@
       "body_battery_highest": { "default": "mdi:battery-charging-100" },
       "body_battery_lowest": { "default": "mdi:battery-heart-outline" },
       "body_battery_most_recent": { "default": "mdi:battery-heart" },
+      "body_battery_stress_timeline": { "default": "mdi:chart-line" },
       "body_fat": { "default": "mdi:percent" },
       "body_water": { "default": "mdi:water-percent" },
       "bone_mass": { "default": "mdi:bone" },

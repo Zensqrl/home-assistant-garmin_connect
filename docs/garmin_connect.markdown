@@ -69,6 +69,18 @@ This integration provides **110+ sensors** covering various health and fitness m
 
 - **Body Battery** - Current energy level (0-100)
 - **Charged/Drained** - Energy gained/spent
+- **Body Battery and Stress Timeline** - Today's intraday Body Battery and stress
+  curves, as `body_battery` and `stress` attributes in `[[epoch_ms, value], ...]`
+  form plus a `calendar_date`. The state is the Body Battery sample count.
+
+  These values are computed by your Garmin device, not by Home Assistant. Only
+  the current day is exposed and the series reset at local midnight. New samples
+  appear only when the device syncs to Garmin Connect, so the curve advances at
+  sync cadence rather than at the integration's polling interval. Gaps are
+  expected wherever the watch was off the wrist, and stress uses `-1`
+  (unmeasurable, typically during activity) and `-2` (no reading) sentinels,
+  which are passed through unchanged. Both arrays are excluded from the Recorder
+  database because a full day of samples exceeds its 16 KiB attribute limit.
 
 ### Body Composition
 

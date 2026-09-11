@@ -10,6 +10,7 @@ from custom_components.garmin_connect.sensor import (
     BODY_COMPOSITION_SENSORS,
     GEAR_SENSORS,
     GOALS_SENSORS,
+    INTRADAY_TIMELINE_SENSORS,
     MENSTRUAL_CYCLE_SENSORS,
     NUTRITION_SENSORS,
     TRAINING_SENSORS,
@@ -23,6 +24,7 @@ from .conftest import (
     mock_activity_data,
     mock_blood_pressure_data,
     mock_body_data,
+    mock_core_data,
     mock_gear_data,
     mock_goals_data,
     mock_menstrual_data,
@@ -916,3 +918,140 @@ def test_route_polyline_remains_available_live() -> None:
 
     assert len(sensor.extra_state_attributes["polyline"]) == 10
     assert sensor.native_value == 10
+
+
+# ── intraday body battery / stress timelines ─────────────────────────────────
+
+
+def _timeline_sensor(data: dict) -> GarminConnectSensor:
+    """Build the real bodyBatteryStressTimeline sensor over the given core data."""
+    description = next(
+        d for d in INTRADAY_TIMELINE_SENSORS if d.key == "bodyBatteryStressTimeline"
+    )
+    coord = MagicMock()
+    coord.data = data
+    return GarminConnectSensor(coord, description, "entry_id")
+
+
+def _timeline_recorded_attributes(sensor: GarminConnectSensor) -> bytes:
+    """Serialize the timeline sensor through the recorder's own encoder."""
+    from homeassistant.components.recorder.db_schema import StateAttributes
+    from homeassistant.const import EVENT_STATE_CHANGED
+    from homeassistant.core import Event, State
+
+    unrecorded = (
+        sensor._entity_component_unrecorded_attributes | sensor._unrecorded_attributes
+    )
+    state = State(
+        "sensor.garmin_connect_body_battery_and_stress_timeline",
+        str(sensor.native_value),
+        sensor.extra_state_attributes,
+        state_info={"unrecorded_attributes": unrecorded},
+    )
+    event = Event(
+        EVENT_STATE_CHANGED,
+        {"entity_id": state.entity_id, "old_state": None, "new_state": state},
+    )
+    return StateAttributes.shared_attrs_bytes_from_event(event, None)
+
+
+def _full_day_core_data() -> dict:
+    """Core data with a realistic full day of 3-minute intraday samples."""
+    start = 1769212800000
+    step = 180000
+    samples = 480
+    return {
+        "intradayCalendarDate": "2026-01-24",
+        "bodyBatteryTimeline": [
+            [start + i * step, 100 - (i % 100)] for i in range(samples)
+        ],
+        "stressTimeline": [[start + i * step, i % 100] for i in range(samples)],
+    }
+
+
+def test_timeline_value_is_the_body_battery_sample_count() -> None:
+    """State is the sample count, matching the lastActivityRoute precedent."""
+    sensor = _timeline_sensor(mock_core_data())
+
+    assert sensor.native_value == 3
+
+
+def test_timeline_exposes_both_series_and_the_date() -> None:
+    """One entity carries both series from the single dailyStress response."""
+    attrs = _timeline_sensor(mock_core_data()).extra_state_attributes
+
+    assert attrs["body_battery"] == [
+        [1769212800000, 84],
+        [1769213100000, 82],
+        [1769213400000, 80],
+    ]
+    assert attrs["stress"] == [
+        [1769212800000, 24],
+        [1769213100000, -1],
+        [1769213400000, 31],
+    ]
+    assert str(attrs["calendar_date"]) == "2026-01-24"
+
+
+def test_timeline_handles_missing_data() -> None:
+    """A day with no samples yet must report 0 and empty series, not fail."""
+    sensor = _timeline_sensor({"totalSteps": 100})
+
+    assert sensor.native_value == 0
+    assert sensor.extra_state_attributes["body_battery"] == []
+    assert sensor.extra_state_attributes["stress"] == []
+
+
+def test_timeline_series_never_reach_the_recorder() -> None:
+    """Both timelines must be excluded from what the recorder persists."""
+    recorded = _timeline_recorded_attributes(_timeline_sensor(_full_day_core_data()))
+
+    # `!= b"{}"` carries the weight: over the size cap the recorder drops every
+    # attribute, so asserting only absence would pass for the wrong reason.
+    assert recorded != b"{}"
+    parsed = json.loads(recorded)
+    assert "body_battery" not in parsed
+    assert "stress" not in parsed
+
+
+def test_timeline_recorded_attributes_stay_under_the_16kib_cap() -> None:
+    """Recorded attributes must fit the recorder's hard 16 KiB limit."""
+    recorded = _timeline_recorded_attributes(_timeline_sensor(_full_day_core_data()))
+
+    assert recorded != b"{}"
+    assert len(recorded) < 16384
+
+
+def test_timeline_calendar_date_is_still_recorded() -> None:
+    """Dropping the series must not drop the sensor's small attributes."""
+    recorded = json.loads(
+        _timeline_recorded_attributes(_timeline_sensor(_full_day_core_data()))
+    )
+
+    assert recorded["calendar_date"] == "2026-01-24"
+
+
+def test_timeline_series_remain_available_live() -> None:
+    """The series must stay on the live entity for charting cards."""
+    sensor = _timeline_sensor(_full_day_core_data())
+
+    assert len(sensor.extra_state_attributes["body_battery"]) == 480
+    assert len(sensor.extra_state_attributes["stress"]) == 480
+    assert sensor.native_value == 480
+
+
+def test_timeline_does_not_duplicate_existing_scalars() -> None:
+    """The new entity must not repeat the scalar body battery / stress keys."""
+    existing = {
+        "bodyBatteryMostRecentValue",
+        "bodyBatteryHighestValue",
+        "bodyBatteryLowestValue",
+        "bodyBatteryChargedValue",
+        "bodyBatteryDrainedValue",
+        "averageStressLevel",
+        "maxStressLevel",
+    }
+    keys = {d.key for d in INTRADAY_TIMELINE_SENSORS}
+
+    assert keys == {"bodyBatteryStressTimeline"}
+    assert not keys & existing
