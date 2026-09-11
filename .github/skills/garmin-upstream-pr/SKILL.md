@@ -30,6 +30,8 @@ git diff upstream/main -- requirements.txt custom_components/garmin_connect/mani
 
 Must print nothing, unless the feature legitimately adds a dependency. Anything there means the fork's wheel pin leaked in.
 
+**No agent customization goes upstream.** Everything under `.github/skills/`, `.github/prompts/` and `.github/agents/` is fork-only in both repos, by standing decision — never include it in a PR, in either direction. Root-level `CLAUDE.md` and `AGENTS.md` improvements *are* welcome upstream, minus the fork sections; note that upstream's `CLAUDE.md` is shorter than the fork's, so hunks often need re-anchoring rather than a clean apply.
+
 **Upstream hassfest passing is the proof the pin was scrubbed** — it is the one check the fork permanently fails. If it fails on the PR branch, the pin is still present.
 
 Integration PRs must include the matching `strings.json`, `translations/en.json`, `icons.json` and docs entries; review bounces a sensor with no translation key. Run `scripts/test && scripts/lint`, or `make lint && make test` for the library.

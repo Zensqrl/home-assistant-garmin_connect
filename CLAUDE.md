@@ -44,8 +44,9 @@ fork-profile:
   overlay:
     - custom_components/garmin_connect/manifest.json   # the `requirements` line only
     - requirements.txt                                 # the `ha-garmin` line only
-    - .github/skills/garmin-release/
-    - .github/skills/garmin-upstream-pr/
+    - .github/skills/                                  # all agent customization is fork-only
+    - .github/prompts/
+    - .github/agents/
     - .github/workflows/upstream-sync.yml
     - CLAUDE.md                                        # the fork sections only
   verify:
