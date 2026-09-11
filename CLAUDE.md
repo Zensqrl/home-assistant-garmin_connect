@@ -71,6 +71,10 @@ Adding a sensor: description tuple in its coordinator group → group listed in 
 
 Gear and power-to-weight sensors are created dynamically from list data rather than static descriptions, and are added on coordinator updates.
 
+### Large attributes and Recorder
+
+Home Assistant's recorder drops **all** attributes for a state whose attribute blob exceeds 16 KiB, so any sensor exposing a big array must keep it out of the database. `GarminConnectSensor` declares a class-level `_unrecorded_attributes = frozenset({"polyline"})` for exactly this reason — it must be a class attribute, not set per instance or per entity description. New bulk attributes (timelines, coordinate lists, per-sample arrays) belong in that frozenset, and a sibling sensor sharing the same payload should strip the array from its own `attributes_fn` (see how `lastActivity` excludes `polyline`). Unrecorded attributes still live in the state machine and are sent to the frontend, so keep them compact anyway. The `test_route_*` tests in [tests/test_sensor.py](tests/test_sensor.py) are the template for proving both the exclusion and the 16 KiB ceiling.
+
 ### Services
 
 Adding a service touches five files: `vol.Schema` + handler registration in [services.py](custom_components/garmin_connect/services.py), field metadata in [services.yaml](custom_components/garmin_connect/services.yaml), descriptions under `services` in [strings.json](custom_components/garmin_connect/strings.json), an icon in [icons.json](custom_components/garmin_connect/icons.json), and a test in [tests/test_services.py](tests/test_services.py). User-facing failures must raise translated `HomeAssistantError` subclasses (Silver `action-exceptions` rule).

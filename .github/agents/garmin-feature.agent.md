@@ -23,10 +23,11 @@ Use the default agent instead when the work is confined to a single repo and a s
 Track the work with a todo list; each repo boundary is a checkpoint.
 
 1. **Scope it.** Decide which layers the feature touches: library endpoint, sensor, service, or a combination. Confirm with the user if the request is ambiguous.
-2. **Library first.** If the data or write method is missing, follow the checklist in the `ha-garmin` folder's `.github/prompts/add-garmin-endpoint.prompt.md`. Finish with `make lint` and `make test` passing before moving on.
-3. **Integration next.** Follow `.github/prompts/add-garmin-sensor.prompt.md` for read data and `.github/prompts/add-garmin-service.prompt.md` for write actions. Read the relevant prompt file before editing — do not work from memory.
-4. **Pin.** If the library changed, follow `.github/prompts/bump-ha-garmin.prompt.md` to bump the version and update the pin in both `requirements.txt` and `manifest.json`.
-5. **Verify.** `make lint && make test` in the library, `scripts/test && scripts/lint` in the integration. Fix failures rather than reporting them.
+2. **Check the request against reality.** Before editing, verify every assumption the request makes about the repos — whether a client method, endpoint, entity pattern, or mechanism already exists. Report the mismatches and the precedent you will follow instead, then continue. A request describing something as missing when it is already implemented is common; do not build it twice.
+3. **Library first.** If the data or write method is missing, follow the checklist in the `ha-garmin` folder's `.github/prompts/add-garmin-endpoint.prompt.md`. Finish with `make lint` and `make test` passing before moving on.
+4. **Integration next.** Follow `.github/prompts/add-garmin-sensor.prompt.md` for read data and `.github/prompts/add-garmin-service.prompt.md` for write actions. Read the relevant prompt file before editing — do not work from memory.
+5. **Pin.** If the library changed, follow `.github/prompts/bump-ha-garmin.prompt.md` to bump the version and update the pin in both `requirements.txt` and `manifest.json`.
+6. **Verify.** `make lint && make test` in the library, `scripts/test && scripts/lint` in the integration. Fix failures rather than reporting them.
 
 Both repos' agent instructions (`AGENTS.md` in the library, `CLAUDE.md` in the integration) are authoritative for conventions — consult them when a detail is not covered by a prompt.
 
@@ -34,7 +35,9 @@ Both repos' agent instructions (`AGENTS.md` in the library, `CLAUDE.md` in the i
 
 Finish with:
 
-1. A table of changed files, grouped by repo.
-2. The resulting entity ID / action name, and the new library version if bumped.
-3. Test and lint results for both repos.
-4. Remaining manual steps, always calling out the PyPI publish when the library changed — the integration cannot install the new pin until then.
+1. Any mismatch between what the request assumed and what the repos actually contain.
+2. A table of changed files, grouped by repo.
+3. The resulting entity ID / action name, and the new library version if bumped.
+4. Test and lint results for both repos.
+5. Anything that still needs verification against live Garmin data, stated as the exact sanitized output you need from the user.
+6. Remaining manual steps, always calling out the PyPI publish when the library changed — the integration cannot install the new pin until then.

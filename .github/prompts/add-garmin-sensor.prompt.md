@@ -48,6 +48,16 @@ Rules:
 - Set `preserve_value=True` only for values that legitimately go `None` during the day (weight, sleep, HRV).
 - If you create a **new** group tuple, register it in `_COORDINATOR_SENSOR_MAP`.
 
+### Large array attributes
+
+If `attributes_fn` returns a big array (timeline, coordinate list, per-sample data), it must be kept out of Recorder — a state whose attribute blob exceeds 16 KiB has **all** of its attributes dropped from history:
+
+- Add the attribute name to the class-level `_unrecorded_attributes` frozenset on `GarminConnectSensor` (it already holds `polyline`). It must stay a class attribute; setting it per instance or per entity description does nothing.
+- If a sibling sensor shares the same payload, strip the array from its `attributes_fn` too — see how `lastActivity` excludes `polyline` while `lastActivityRoute` exposes it.
+- Prefer the existing precedent for the state value: `lastActivityRoute` uses the sample count, not a derived timestamp. Deviate only with a stated reason.
+- Mirror the `test_route_*` tests in `tests/test_sensor.py`: one asserting the attribute is unrecorded, one asserting the remaining recorded attributes stay under the cap, one asserting the array is still available live.
+- Unrecorded attributes are still sent to the frontend on every update, so keep the payload compact regardless.
+
 ### Dynamic sensors
 
 If the sensor must be created **per item in a list** (one entity per gear item, per sport, …), a static description will not work. Follow `GarminConnectGearSensor` / `GarminConnectPowerToWeightSensor` in the same file instead:
