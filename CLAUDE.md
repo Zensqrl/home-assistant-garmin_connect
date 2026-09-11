@@ -49,6 +49,9 @@ fork-profile:
     - .github/agents/
     - .github/workflows/upstream-sync.yml
     - CLAUDE.md                                        # the fork sections only
+  sync-conflicts:                                      # deterministic, apply mechanically
+    requirements.txt: keep the fork's wheel URL line
+    manifest.json: keep the fork's `requirements`; adopt upstream's `version` as the new base, counter to .0
   verify:
     - scripts/test
     - scripts/lint
@@ -83,7 +86,7 @@ Don't do any of this by hand: the `garmin-release` skill ([.github/skills/garmin
 
 Branch model, scrub rules and the two-PR ordering live in the **fork-maintenance** skill. The `garmin-upstream-pr` skill ([.github/skills/garmin-upstream-pr/SKILL.md](.github/skills/garmin-upstream-pr/SKILL.md)) applies them to this pair of repos.
 
-[upstream-sync.yml](.github/workflows/upstream-sync.yml) opens a weekly PR when `cyberjunky/home-assistant-garmin_connect` moves ahead. **Merge those with a merge commit only** — squashing breaks the ancestry check the workflow relies on.
+[upstream-sync.yml](.github/workflows/upstream-sync.yml) files a tracking issue when `cyberjunky/home-assistant-garmin_connect` moves ahead, and closes it once you have caught up. It only detects — `GITHUB_TOKEN` can neither push workflow files nor open a PR headed by the upstream repo. Sync locally with a **merge commit**; squashing breaks the ancestry check the detector relies on.
 
 ## Architecture
 
