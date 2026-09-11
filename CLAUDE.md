@@ -52,6 +52,10 @@ All sensors are declared as `GarminConnectSensorEntityDescription` tuples in [se
 - `attributes_fn` — lambda to extract extra state attributes
 - `preserve_value=True` — retains last non-`None` value (used for weight, sleep, HRV which go `None` mid-day)
 
+### Large attributes and Recorder
+
+Home Assistant's recorder drops **all** attributes for a state whose attribute blob exceeds 16 KiB, so any sensor exposing a big array must keep it out of the database. `GarminConnectSensor` declares a class-level `_unrecorded_attributes = frozenset({"polyline"})` for exactly this reason — it must be a class attribute, not set per instance or per entity description. New bulk attributes (timelines, coordinate lists, per-sample arrays) belong in that frozenset, and a sibling sensor sharing the same payload should strip the array from its own `attributes_fn` (see how `lastActivity` excludes `polyline`). Unrecorded attributes still live in the state machine and are sent to the frontend, so keep them compact anyway. The `test_route_*` tests in [tests/test_sensor.py](tests/test_sensor.py) are the template for proving both the exclusion and the 16 KiB ceiling.
+
 ### Key data facts from `ha-garmin`
 
 - `startTimeLocal` is **dropped** by the library; use `startTime` (UTC datetime) instead. In templates: `(a.startTime | as_datetime | as_local).strftime('%Y-%m-%d')`
