@@ -168,6 +168,42 @@ All sensors are created under a single "Garmin Connect" device. Entity IDs follo
 | Body Battery | Current energy level (0–100) |
 | Charged / Drained | Energy gained and spent |
 | Highest / Lowest | Daily peak and low |
+| Body Battery and Stress Timeline | Today's intraday Body Battery and stress curves (see below) |
+
+#### Body Battery and Stress Timeline
+
+This sensor exposes the two intraday curves Garmin already computed on your
+watch — Body Battery (0–100 energy reserve) and stress (0–100 from heart rate
+variability). Home Assistant does **not** calculate either value; it only
+mirrors what Garmin Connect returns.
+
+The state is the number of Body Battery samples for the day. The curves
+themselves are attributes:
+
+| Attribute | Format |
+|-----------|--------|
+| `body_battery` | `[[epoch_ms, level], ...]`, oldest first |
+| `stress` | `[[epoch_ms, stress_level], ...]`, oldest first |
+| `calendar_date` | The day both series belong to |
+
+Things to know:
+
+- **Only the current day is exposed.** There is no history API call — at local
+  midnight the series restart empty and fill in again as the day goes on.
+- **Cadence follows your device sync, not the polling interval.** New samples
+  only appear after the watch uploads to Garmin Connect. Polling more often
+  does not produce more points, and a phone that has not synced for hours
+  leaves the curve flat-lining at its last sample.
+- **Gaps are normal.** Periods with the watch off the wrist produce no samples
+  at all. Stress additionally uses negative sentinel values — `-1` for
+  unmeasurable (too much motion, e.g. during an activity) and `-2` for no
+  reading — which are passed through unchanged rather than translated.
+- **The arrays are not recorded.** Both are excluded from the Recorder database
+  because a full day of samples would exceed its 16 KiB attribute limit and
+  cause *all* attributes of the entity to be dropped from history. They are
+  available live in templates and cards, but not in long-term statistics.
+- The existing Body Battery, Charged/Drained and stress sensors are unchanged;
+  this entity does not duplicate them.
 
 ### Body Composition
 

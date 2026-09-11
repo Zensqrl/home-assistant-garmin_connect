@@ -1,7 +1,7 @@
 """Fixtures for Garmin Connect tests."""
 
 from collections.abc import Generator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -132,6 +132,17 @@ def mock_core_data() -> dict:
         "bodyBatteryLowestValue": 20,
         "bodyBatteryChargedValue": 40,
         "bodyBatteryDrainedValue": 20,
+        "intradayCalendarDate": date(2026, 1, 24),
+        "bodyBatteryTimeline": [
+            [1769212800000, 84],
+            [1769213100000, 82],
+            [1769213400000, 80],
+        ],
+        "stressTimeline": [
+            [1769212800000, 24],
+            [1769213100000, -1],
+            [1769213400000, 31],
+        ],
         "activeMinutes": 45,
         "highlyActiveMinutes": 20,
         "sedentaryMinutes": 500,
