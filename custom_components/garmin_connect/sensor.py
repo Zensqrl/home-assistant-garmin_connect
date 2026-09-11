@@ -445,6 +445,22 @@ BODY_BATTERY_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
     ),
 )
 
+# Intraday timelines — both series arrive in one Garmin dailyStress response, so
+# one entity carries both rather than duplicating the request or the scalars above.
+INTRADAY_TIMELINE_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
+    GarminConnectSensorEntityDescription(
+        key="bodyBatteryStressTimeline",
+        translation_key="body_battery_stress_timeline",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda data: len(data.get("bodyBatteryTimeline") or []),
+        attributes_fn=lambda data: {
+            "calendar_date": data.get("intradayCalendarDate"),
+            "body_battery": data.get("bodyBatteryTimeline") or [],
+            "stress": data.get("stressTimeline") or [],
+        },
+    ),
+)
+
 # Intensity & Activity Time Sensors — ha_garmin computes *Minutes from *Seconds
 INTENSITY_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
     GarminConnectSensorEntityDescription(
@@ -723,6 +739,7 @@ CORE_SENSOR_DESCRIPTIONS: tuple[GarminConnectSensorEntityDescription, ...] = (
     *STRESS_PERCENTAGE_SENSORS,
     *SLEEP_SENSORS,
     *BODY_BATTERY_SENSORS,
+    *INTRADAY_TIMELINE_SENSORS,
     *INTENSITY_SENSORS,
     *HEALTH_MONITORING_SENSORS,
     *ADDITIONAL_DISTANCE_SENSORS,
@@ -1840,7 +1857,9 @@ class GarminConnectSensor(CoordinatorEntity[BaseGarminCoordinator], SensorEntity
     # The lastActivityRoute polyline is a full GPS track and blows past the recorder's
     # hard 16 KiB attribute cap, which makes it drop the entity's attributes wholesale.
     # Keep it live-only for the map card and templates; the rest still records.
-    _unrecorded_attributes = frozenset({"polyline"})
+    # The intraday body_battery/stress timelines are a full day of samples and are
+    # kept out for the same reason.
+    _unrecorded_attributes = frozenset({"polyline", "body_battery", "stress"})
 
     def __init__(
         self,

@@ -104,6 +104,7 @@
       "body_battery_highest": { "name": "Body battery highest" },
       "body_battery_lowest": { "name": "Body battery lowest" },
       "body_battery_most_recent": { "name": "Body battery" },
+      "body_battery_stress_timeline": { "name": "Body battery and stress timeline" },
       "body_fat": { "name": "Body fat" },
       "body_water": { "name": "Body water" },
       "bone_mass": { "name": "Bone mass" },
