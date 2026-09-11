@@ -32,7 +32,51 @@ Tooling notes:
 
 ## Versioning
 
-The `ha-garmin` dependency is consumed from **PyPI as an exact pin**, even though it is a sibling folder in this workspace. Bumping it means editing **both** [requirements.txt](requirements.txt) and `requirements` in [manifest.json](custom_components/garmin_connect/manifest.json). The integration `version` in manifest.json is bumped manually — there is no release automation for it.
+This is a personal fork. Branching, merge-strategy, sync and upstream-PR rules come from the **fork-maintenance** skill — this file only records what is specific to this repo.
+
+```yaml
+fork-profile:
+  upstream: cyberjunky/home-assistant-garmin_connect
+  upstream-default-branch: main
+  fork-owner: Zensqrl
+  deploy-target: HACS custom repository (GitHub release on the fork)
+  version-scheme: plain increments, always >= upstream  # not local versions; HACS handling of `+` is unverified
+  overlay:
+    - custom_components/garmin_connect/manifest.json   # the `requirements` line only
+    - requirements.txt                                 # the `ha-garmin` line only
+    - .github/skills/garmin-release/
+    - .github/skills/garmin-upstream-pr/
+    - .github/workflows/upstream-sync.yml
+    - CLAUDE.md                                        # the fork sections only
+  verify:
+    - scripts/test
+    - scripts/lint
+  release: garmin-release skill
+```
+
+The `ha-garmin` dependency is **not** taken from PyPI — it is a PEP 508 direct reference to a wheel attached to a GitHub release on the `Zensqrl/ha-garmin` fork:
+
+```
+ha-garmin @ https://github.com/Zensqrl/ha-garmin/releases/download/v<x.y.z>/ha_garmin-<x.y.z>-py3-none-any.whl
+```
+
+Home Assistant pip-installs that URL at setup time, so the release asset must already exist before the pin is written — a dangling URL fails integration setup. Bumping means editing **both** [requirements.txt](requirements.txt) and `requirements` in [manifest.json](custom_components/garmin_connect/manifest.json).
+
+`is_installed()` in `homeassistant/util/package.py` returns `False` for any requirement carrying a URL, so HA re-runs pip on **every** setup. Consequences: a changed URL always takes effect, even without a version bump; and HA reaches GitHub on every restart, so an unreachable asset fails setup. Pin the exact tag anyway, for reproducibility.
+
+HACS installs only copy `custom_components/garmin_connect/` — it does not manage Python dependencies, and manifest requirements are resolved before any config entry is read, so the source cannot be made configurable per install.
+
+The **hassfest** job fails on this pin; its requirements check demands `name==version` and rejects direct references. That is the accepted cost of the fork — do not "fix" it by reverting to PyPI. It passing on an upstream PR branch is the proof the pin was left behind.
+
+The integration `version` in manifest.json is its own release number, independent of the library version, and is what HACS uses to offer an update.
+
+Don't do any of this by hand: the `garmin-release` skill ([.github/skills/garmin-release/SKILL.md](.github/skills/garmin-release/SKILL.md)) runs the whole pipeline — bump, commit, tag the library so Actions builds the wheel, repoint the pin, bump and tag the integration.
+
+## Contributing upstream
+
+Branch model, scrub rules and the two-PR ordering live in the **fork-maintenance** skill. The `garmin-upstream-pr` skill ([.github/skills/garmin-upstream-pr/SKILL.md](.github/skills/garmin-upstream-pr/SKILL.md)) applies them to this pair of repos.
+
+[upstream-sync.yml](.github/workflows/upstream-sync.yml) opens a weekly PR when `cyberjunky/home-assistant-garmin_connect` moves ahead. **Merge those with a merge commit only** — squashing breaks the ancestry check the workflow relies on.
 
 ## Architecture
 
