@@ -67,7 +67,9 @@ Home Assistant pip-installs that URL at setup time, so the release asset must al
 
 HACS installs only copy `custom_components/garmin_connect/` — it does not manage Python dependencies, and manifest requirements are resolved before any config entry is read, so the source cannot be made configurable per install.
 
-The **hassfest** job fails on this pin; its requirements check demands `name==version` and rejects direct references. That is the accepted cost of the fork — do not "fix" it by reverting to PyPI. It passing on an upstream PR branch is the proof the pin was left behind.
+The **hassfest** job fails on this pin — its requirements check rejects any requirement containing a space, which a PEP 508 direct reference (`name @ url`) always does. That is the accepted cost of the fork — do not "fix" it by reverting to PyPI. It passing on an upstream PR branch is the proof the pin was left behind.
+
+**HACS validation** must stay green, and needs two settings GitHub does not carry over when forking: the Issues tab enabled, and repository topics set (`garmin-connect`, `home-assistant`, `home-assistant-component`). Both are one-time.
 
 The integration `version` in manifest.json is its own release number, independent of the library version, and is what HACS uses to offer an update.
 
