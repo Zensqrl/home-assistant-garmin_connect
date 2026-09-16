@@ -44,6 +44,7 @@ fork-profile:
   overlay:
     - custom_components/garmin_connect/manifest.json   # the `requirements` line only
     - requirements.txt                                 # the `ha-garmin` line only
+    - hacs.json                                        # the `name` field only — fork branding
     - .github/skills/                                  # all agent customization is fork-only
     - .github/prompts/
     - .github/agents/
@@ -52,6 +53,7 @@ fork-profile:
   sync-conflicts:                                      # deterministic, apply mechanically
     requirements.txt: keep the fork's wheel URL line
     manifest.json: keep the fork's `requirements`; adopt upstream's `version` as the new base, counter to .0
+    hacs.json: keep the fork's `name`; adopt upstream's other fields
   verify:
     - scripts/test
     - scripts/lint
