@@ -1,4 +1,4 @@
 homeassistant>=2026.8.1
-ha-garmin @ https://github.com/Zensqrl/ha-garmin/releases/download/v0.1.37+zs1/ha_garmin-0.1.37+zs1-py3-none-any.whl
+ha-garmin @ https://github.com/Zensqrl/ha-garmin/releases/download/v0.1.47+zs1/ha_garmin-0.1.47+zs1-py3-none-any.whl
 colorlog==6.12.0
 setuptools==84.0.0

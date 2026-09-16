@@ -14,7 +14,7 @@
   ],
   "quality_scale": "gold",
   "requirements": [
-    "ha-garmin @ https://github.com/Zensqrl/ha-garmin/releases/download/v0.1.37+zs1/ha_garmin-0.1.37+zs1-py3-none-any.whl"
+    "ha-garmin @ https://github.com/Zensqrl/ha-garmin/releases/download/v0.1.47+zs1/ha_garmin-0.1.47+zs1-py3-none-any.whl"
   ],
   "version": "3.0.17.0"
 }
