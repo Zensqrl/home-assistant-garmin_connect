@@ -574,6 +574,13 @@ HEALTH_MONITORING_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     GarminConnectSensorEntityDescription(
+        key="avgSleepRespirationValue",
+        translation_key="avg_sleep_respiration",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="brpm",
+        preserve_value=True,
+    ),
+    GarminConnectSensorEntityDescription(
         key="averageMonitoringEnvironmentAltitude",
         translation_key="avg_altitude",
         device_class=SensorDeviceClass.DISTANCE,
@@ -803,6 +810,32 @@ ACTIVITY_TRACKING_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
         attributes_fn=lambda data: {
             "last_workouts": (data.get("workouts") or [])[-10:],
         },
+    ),
+    GarminConnectSensorEntityDescription(
+        key="todayScheduledWorkout",
+        translation_key="today_scheduled_workout",
+        coordinator_type=CoordinatorType.ACTIVITY,
+        value_fn=lambda data: (data.get("todayScheduledWorkout") or {}).get("title"),
+        attributes_fn=lambda data: data.get("todayScheduledWorkout") or {},
+    ),
+    GarminConnectSensorEntityDescription(
+        key="nextScheduledWorkout",
+        translation_key="next_scheduled_workout",
+        coordinator_type=CoordinatorType.ACTIVITY,
+        value_fn=lambda data: (data.get("nextScheduledWorkout") or {}).get("title"),
+        attributes_fn=lambda data: {
+            **(data.get("nextScheduledWorkout") or {}),
+            "upcoming": data.get("scheduledWorkouts") or [],
+        },
+    ),
+    GarminConnectSensorEntityDescription(
+        key="trainingPlanGoalEvent",
+        translation_key="training_plan_goal_event",
+        coordinator_type=CoordinatorType.ACTIVITY,
+        value_fn=lambda data: (data.get("trainingPlanGoalEvent") or {}).get(
+            "eventName"
+        ),
+        attributes_fn=lambda data: data.get("trainingPlanGoalEvent") or {},
     ),
 )
 
@@ -1284,6 +1317,38 @@ GEAR_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
         attributes_fn=lambda data: {"devices": data.get("solarIntensity")},
     ),
     GarminConnectSensorEntityDescription(
+        key="avgSolarUtilization",
+        translation_key="avg_solar_intensity",
+        coordinator_type=CoordinatorType.GEAR,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda data: next(
+            (
+                d.get("avgSolarUtilization")
+                for d in (data.get("solarIntensity") or [])
+                if d.get("avgSolarUtilization") is not None
+            ),
+            None,
+        ),
+        attributes_fn=lambda data: {"devices": data.get("solarIntensity")},
+    ),
+    GarminConnectSensorEntityDescription(
+        key="totalActivityTimeGainMinutes",
+        translation_key="solar_time_gained",
+        coordinator_type=CoordinatorType.GEAR,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=lambda data: next(
+            (
+                d.get("totalActivityTimeGainMinutes")
+                for d in (data.get("solarIntensity") or [])
+                if d.get("totalActivityTimeGainMinutes") is not None
+            ),
+            None,
+        ),
+        attributes_fn=lambda data: {"devices": data.get("solarIntensity")},
+    ),
+    GarminConnectSensorEntityDescription(
         key="devices",
         translation_key="devices",
         coordinator_type=CoordinatorType.GEAR,
@@ -1294,6 +1359,15 @@ GEAR_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
             "devices": data.get("devices"),
             "last_used_device": data.get("lastUsedDevice"),
         },
+    ),
+    GarminConnectSensorEntityDescription(
+        key="sensors",
+        translation_key="connected_sensors",
+        coordinator_type=CoordinatorType.GEAR,
+        value_fn=lambda data: (
+            len(data["sensors"]) if isinstance(data.get("sensors"), list) else None
+        ),
+        attributes_fn=lambda data: {"sensors": data.get("sensors")},
     ),
 )
 

@@ -92,6 +92,8 @@
       "activity_stress_duration": { "name": "Activity stress duration" },
       "activity_stress_percentage": { "name": "Activity stress percentage" },
       "avg_altitude": { "name": "Average altitude" },
+      "avg_sleep_respiration": { "name": "Average sleep respiration" },
+      "avg_solar_intensity": { "name": "Average solar intensity" },
       "avg_spo2": { "name": "Average SpO2" },
       "avg_stress_level": { "name": "Average stress level" },
       "awake_duration": { "name": "Awake duration" },
@@ -114,6 +116,7 @@
       "bp_systolic": { "name": "Blood pressure systolic" },
       "burned_calories": { "name": "Burned calories" },
       "chronological_age": { "name": "Chronological age" },
+      "connected_sensors": { "name": "Connected sensors" },
       "consumed_calories": { "name": "Consumed calories" },
       "daily_step_goal": { "name": "Daily step goal" },
       "deep_sleep": { "name": "Deep sleep" },
@@ -182,6 +185,7 @@
       "muscle_mass": { "name": "Muscle mass" },
       "nap_time": { "name": "Nap time" },
       "next_alarm": { "name": "Next alarm" },
+      "next_scheduled_workout": { "name": "Next scheduled workout" },
       "nutrition_calorie_goal": { "name": "Nutrition calorie goal" },
       "nutrition_carbs_goal": { "name": "Nutrition carbohydrates goal" },
       "nutrition_consumed_calories": { "name": "Nutrition consumed calories" },
@@ -212,8 +216,10 @@
       "sleep_score": { "name": "Sleep score" },
       "sleeping_time": { "name": "Sleeping time" },
       "solar_intensity": { "name": "Solar intensity" },
+      "solar_time_gained": { "name": "Solar time gained" },
       "stress_percentage": { "name": "Stress percentage" },
       "stress_qualifier": { "name": "Stress qualifier" },
+      "today_scheduled_workout": { "name": "Today's scheduled workout" },
       "total_calories": { "name": "Calories" },
       "total_distance": { "name": "Distance" },
       "total_intensity_minutes": { "name": "Intensity minutes" },
@@ -221,6 +227,7 @@
       "total_steps": { "name": "Steps" },
       "total_stress_duration": { "name": "Stress duration" },
       "recovery_time": { "name": "Recovery time" },
+      "training_plan_goal_event": { "name": "Training plan goal event" },
       "training_readiness": { "name": "Training readiness" },
       "training_status": { "name": "Training status" },
       "uncategorized_stress_duration": { "name": "Uncategorized stress duration" },
@@ -241,6 +248,9 @@
       "wellness_start_time": { "name": "Wellness start time" },
       "yesterday_distance": { "name": "Yesterday distance" },
       "yesterday_steps": { "name": "Yesterday steps" }
+    },
+    "calendar": {
+      "scheduled_workouts": { "name": "Scheduled workouts" }
     }
   },
   "services": {
@@ -301,7 +311,7 @@
       "fields": {
         "systolic": { "name": "Systolic", "description": "Systolic blood pressure value." },
         "diastolic": { "name": "Diastolic", "description": "Diastolic blood pressure value." },
-        "pulse": { "name": "Pulse", "description": "Pulse rate." },
+        "pulse": { "name": "Pulse", "description": "Pulse rate (optional)." },
         "timestamp": { "name": "Timestamp", "description": "When the measurement was recorded (defaults to now)." },
         "notes": { "name": "Notes", "description": "Additional notes for the measurement." }
       }

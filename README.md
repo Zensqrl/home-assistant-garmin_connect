@@ -243,6 +243,7 @@ Things to know:
 | Latest SpO2 Time | When SpO2 was last measured |
 | Highest / Lowest / Latest Respiration | Breathing rate (brpm) |
 | Latest Respiration Time | When respiration was last measured |
+| Average Sleep Respiration | Breathing rate averaged over the sleep window (brpm) |
 | Average Altitude | Average monitoring altitude |
 
 ### Fitness & Training
@@ -262,8 +263,11 @@ Things to know:
 | Power to Weight [Sport] | Dynamic per-sport power-to-weight sensor (W/kg), e.g. Running, Cycling |
 | FTP [Sport] | Dynamic per-sport functional threshold power sensor (W), e.g. Running, Cycling |
 | Next Alarm | Next scheduled alarm time |
-| Solar Intensity | Solar charging utilization (%) for solar-capable devices |
+| Solar Intensity | Solar charging utilization (%) at the moment of the last sync, for solar-capable devices |
+| Average Solar Intensity | Solar charging utilization (%) averaged over today's readings so far |
+| Solar Time Gained | Extra battery time gained from solar today (minutes), resets daily |
 | Devices | Number of registered Garmin devices, with per-device details and last used device as attributes |
+| Connected Sensors | Number of paired ANT+/BLE sensors (power meters, HR straps, etc.), with per-sensor id and battery status as attributes |
 
 > Power-to-weight and FTP sensors are created dynamically for each available sport in your Garmin training data. Names are formatted like `Power to Weight Running` and `FTP Running`.
 
@@ -286,7 +290,14 @@ Things to know:
 | Last Activity | Most recent activity with details |
 | Last Activities | Recent activities list (attributes) |
 | Last Workout / Workouts | Scheduled/planned training sessions |
+| Today's Scheduled Workout | Today's training-calendar session, e.g. from a Garmin Coach plan |
+| Next Scheduled Workout | The next upcoming training-calendar session (today or later) |
+| Training Plan Goal Event | Active plan's goal race: name, target distance, target date, projected/predicted time |
 | Last Synced | Last device sync timestamp |
+
+Scheduled workouts (including Garmin Coach / adaptive training plan sessions) are also exposed as a `calendar.garmin_connect_scheduled_workouts` calendar entity — usable with HA's built-in Calendar dashboard card, `calendar.get_events`, and `trigger: calendar` automations.
+
+> **Known limitation:** this data comes from Garmin's `calendar-service` endpoint, the same one used elsewhere in this integration. For adaptive/Coach plans, the Garmin Connect app can show upcoming days further out than this endpoint returns — that fuller view lives behind a different Garmin API that requires session-cookie authentication this integration doesn't support. Expect these sensors and the calendar entity to sometimes show fewer upcoming sessions than the app does, or none at all, even inside the current/next month window.
 
 ### Blood Pressure
 

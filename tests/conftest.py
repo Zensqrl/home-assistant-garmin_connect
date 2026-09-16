@@ -158,6 +158,7 @@ def mock_core_data() -> dict:
         "lowestRespirationValue": 12.0,
         "latestRespirationValue": 15.0,
         "latestRespirationTime": datetime(2026, 1, 24, 11, 0, 0, tzinfo=UTC),
+        "avgSleepRespirationValue": 14.2,
         "averageMonitoringEnvironmentAltitude": 50.0,
         "wellnessStartTime": datetime(2026, 1, 23, 23, 0, 0, tzinfo=UTC),
         "wellnessEndTime": datetime(2026, 1, 24, 16, 0, 0, tzinfo=UTC),
@@ -194,6 +195,46 @@ def mock_activity_data() -> dict:
         ],
         "lastWorkout": {"workoutId": 999, "workoutName": "5k Easy"},
         "workouts": [{"workoutId": 999, "workoutName": "5k Easy"}],
+        "todayScheduledWorkout": {
+            "id": 1774018003,
+            "date": "2026-04-26",
+            "title": "Benchmark Run",
+            "sportTypeKey": "running",
+            "workoutId": 1694501256,
+            "atpPlanId": 1789148356,
+            "protectedWorkoutSchedule": True,
+        },
+        "nextScheduledWorkout": {
+            "id": 1774018003,
+            "date": "2026-04-26",
+            "title": "Benchmark Run",
+            "sportTypeKey": "running",
+            "workoutId": 1694501256,
+            "atpPlanId": 1789148356,
+            "protectedWorkoutSchedule": True,
+        },
+        "scheduledWorkouts": [
+            {
+                "id": 1774018003,
+                "date": "2026-04-26",
+                "title": "Benchmark Run",
+                "sportTypeKey": "running",
+                "workoutId": 1694501256,
+                "atpPlanId": 1789148356,
+                "protectedWorkoutSchedule": True,
+            }
+        ],
+        "trainingPlanGoalEvent": {
+            "eventName": "5K Plan",
+            "date": "2026-11-21",
+            "eventType": "running",
+            "targetDistance": 5.0,
+            "targetDistanceUnit": "kilometer",
+            "trainingPlanType": "COACH_ATP",
+            "projectedRaceTimeDurationSeconds": 1829,
+            "predictedRaceTimeDurationSeconds": 2101,
+            "enrollmentTime": "2026-09-11T12:39:16.350",
+        },
     }
 
 
@@ -320,6 +361,8 @@ def mock_gear_data() -> dict:
                 "solarUtilization": 42.5,
                 "activityTimeGainMs": 60000,
                 "readingTimestampGmt": "2026-01-24T10:00:00.0",
+                "avgSolarUtilization": 31.8,
+                "totalActivityTimeGainMinutes": 15,
             }
         ],
         "devices": [
@@ -346,6 +389,14 @@ def mock_gear_data() -> dict:
             "lastSyncTime": datetime(2026, 1, 24, 10, 30, tzinfo=UTC),
             "imageUrl": "https://example.com/instinct.png",
         },
+        "sensors": [
+            {
+                "deviceId": 111,
+                "sensorType": "HEART_RATE",
+                "batteryStatus": "good",
+                "batteryLevel": 82,
+            }
+        ],
     }
 
 
