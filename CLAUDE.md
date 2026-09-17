@@ -84,7 +84,7 @@ Don't do any of this by hand: the `garmin-release` skill ([.github/skills/garmin
 
 ## Contributing upstream
 
-Branch model, scrub rules and the two-PR ordering live in the **fork-maintenance** skill. The `garmin-upstream-pr` skill ([.github/skills/garmin-upstream-pr/SKILL.md](.github/skills/garmin-upstream-pr/SKILL.md)) applies them to this pair of repos.
+Branch model, scrub rules and the two-PR ordering live in the **fork-maintenance** skill. The `garmin-upstream-pr` skill ([.github/skills/garmin-upstream-pr/SKILL.md](.github/skills/garmin-upstream-pr/SKILL.md)) applies them to this pair of repos: it audits a feature branch for upstream readiness first, then opens the PR only after the audit is clean and the user has approved.
 
 [upstream-sync.yml](.github/workflows/upstream-sync.yml) files a tracking issue when `cyberjunky/home-assistant-garmin_connect` moves ahead, and closes it once you have caught up. It only detects — `GITHUB_TOKEN` can neither push workflow files nor open a PR headed by the upstream repo. Sync locally with a **merge commit**; squashing breaks the ancestry check the detector relies on.
 
