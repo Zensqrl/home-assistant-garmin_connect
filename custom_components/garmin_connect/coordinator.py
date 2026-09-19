@@ -84,6 +84,21 @@ class BaseGarminCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.auth = auth
         self._refresh_lock = asyncio.Lock()
 
+    def _with_source_history(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Carry successful endpoint fetch times across partial failures."""
+        previous = (self.data or {}).get("_sources", {})
+        sources = {}
+        for key, value in data.get("_sources", {}).items():
+            sources[key] = {
+                **value,
+                "last_successful_fetch": (
+                    value.get("fetched_at")
+                    if value.get("outcome") == "ok"
+                    else previous.get(key, {}).get("last_successful_fetch")
+                ),
+            }
+        return {**data, "_sources": sources} if sources else data
+
     def set_update_interval(self, update_interval: timedelta) -> None:
         """Update the coordinator's polling interval."""
         self.update_interval = update_interval
@@ -124,14 +139,14 @@ class CoreCoordinator(BaseGarminCoordinator):
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch core data from Garmin Connect."""
         try:
-            data = await self.client.fetch_core_data()
+            data = await self.client.fetch_core_data(target_date=dt_util.now().date())
             await self._update_tokens_if_changed()
         except GarminAuthError as err:
             raise ConfigEntryAuthFailed("Authentication failed") from err
         except (GarminConnectError, ClientError) as err:
             _LOGGER.debug("Error fetching core data: %s", err)
             raise UpdateFailed(f"Error fetching core data: {err}") from err
-        return data
+        return self._with_source_history(data)
 
 
 class ActivityCoordinator(BaseGarminCoordinator):
@@ -178,14 +193,14 @@ class TrainingCoordinator(BaseGarminCoordinator):
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch training data from Garmin Connect."""
         try:
-            data = await self.client.fetch_training_data()
+            data = await self.client.fetch_training_data(target_date=dt_util.now().date())
             await self._update_tokens_if_changed()
         except GarminAuthError as err:
             raise ConfigEntryAuthFailed("Authentication failed") from err
         except (GarminConnectError, ClientError) as err:
             _LOGGER.debug("Error fetching training data: %s", err)
             raise UpdateFailed(f"Error fetching training data: {err}") from err
-        return data
+        return self._with_source_history(data)
 
 
 class BodyCoordinator(BaseGarminCoordinator):

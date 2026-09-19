@@ -25,6 +25,25 @@ You need a Garmin Connect account with at least one Garmin device that syncs dat
 
 ## Sensors
 
+### Recovery freshness and training load
+
+Acute Training Load, Chronic Training Load, Training Load Ratio, and Training Load
+Ratio Status expose the selected device's Garmin metrics. Acute load is weighted;
+it is not a simple seven-day sum. HRV Balanced Range Lower and Upper expose the
+balanced boundaries without changing the original HRV Baseline sensor.
+
+Selected recovery, steps and training sensors include `data_provenance` when
+supported by the client library. Check the source date, fallback/retained flags,
+latest outcome, and device sync time (when supplied) before using a value for a
+decision. A recent fetch is not proof of a recent measurement. Retained values
+keep their original source metadata. Missing metadata stays unknown.
+
+Core Data Status and Training Data Status are optional diagnostic sensors,
+disabled by default. Their `sources` attributes distinguish empty responses,
+endpoint failures, and dated fallbacks. See the [README](../README.md) for the
+metadata contract and compatibility details. New numeric metrics can accumulate
+statistics through normal Recorder behavior; this does not backfill old data.
+
 This integration provides **110+ sensors** covering various health and fitness metrics. Sensors are grouped into the following categories:
 
 ### Activity & Steps

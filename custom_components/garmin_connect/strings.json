@@ -84,6 +84,14 @@
   },
   "entity": {
     "sensor": {
+      "acute_training_load": { "name": "Acute Training Load" },
+      "chronic_training_load": { "name": "Chronic Training Load" },
+      "training_load_ratio": { "name": "Training Load Ratio" },
+      "training_load_ratio_status": { "name": "Training Load Ratio Status" },
+      "hrv_baseline_balanced_low": { "name": "HRV Balanced Range Lower" },
+      "hrv_baseline_balanced_upper": { "name": "HRV Balanced Range Upper" },
+      "core_data_status": { "name": "Core Data Status" },
+      "training_data_status": { "name": "Training Data Status" },
       "abnormal_hr_alerts": { "name": "Abnormal heart rate alerts" },
       "achievable_fitness_age": { "name": "Achievable fitness age" },
       "active_calories": { "name": "Active calories" },

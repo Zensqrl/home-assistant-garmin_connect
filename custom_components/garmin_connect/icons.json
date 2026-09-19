@@ -12,6 +12,14 @@
   },
   "entity": {
     "sensor": {
+      "acute_training_load": { "default": "mdi:chart-bell-curve" },
+      "chronic_training_load": { "default": "mdi:chart-bell-curve" },
+      "training_load_ratio": { "default": "mdi:scale-balance" },
+      "training_load_ratio_status": { "default": "mdi:scale-balance" },
+      "hrv_baseline_balanced_low": { "default": "mdi:heart-pulse" },
+      "hrv_baseline_balanced_upper": { "default": "mdi:heart-pulse" },
+      "core_data_status": { "default": "mdi:database-clock" },
+      "training_data_status": { "default": "mdi:database-clock" },
       "abnormal_hr_alerts": { "default": "mdi:heart-pulse" },
       "achievable_fitness_age": { "default": "mdi:calendar-heart" },
       "active_calories": { "default": "mdi:fire" },

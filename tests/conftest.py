@@ -261,6 +261,12 @@ def mock_training_data() -> dict:
         "hrvLastNightAvg": 42,
         "hrvLastNight5MinHigh": 65,
         "hrvBaselineLowUpper": 40,
+        "hrvBaselineBalancedLow": 35,
+        "hrvBaselineBalancedUpper": 55,
+        "acuteTrainingLoad": 100,
+        "chronicTrainingLoad": 80,
+        "trainingLoadRatio": 1.25,
+        "trainingLoadRatioStatus": "OPTIMAL",
         "hrvStatus": {
             "status": "BALANCED",
             "weeklyAvg": 45,

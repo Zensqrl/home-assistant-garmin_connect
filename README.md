@@ -8,6 +8,41 @@
 
 # Garmin Connect
 
+### Recovery/training data freshness
+
+The core and training coordinators query the Home Assistant local calendar date.
+Selected recovery, step and training sensors expose a compact `data_provenance`
+attribute when the library provides it. It records endpoint outcome, source date
+(if supplied by Garmin), requested/query dates, fetch time and fallback use.
+`last_successful_fetch` records a non-empty successful endpoint response, not a
+new device measurement. It is kept in memory and resets on integration reload.
+
+When an existing sensor retains its last value across an empty response, its
+source metadata and related attributes are retained together. `retained`,
+`latest_outcome`, `latest_fetch_at`, and `coordinator_available` describe current
+retrieval conditions without making that old observation look current. Consumers
+must decide freshness per metric; sleep from the previous night is expected.
+An `ok` endpoint response does not guarantee every field is populated. Unknown
+source dates are not inferred from the date requested. Older library versions
+without metadata continue to work, with no invented freshness attributes.
+
+New sensors: **Acute Training Load**, **Chronic Training Load**, **Training Load
+Ratio**, **Training Load Ratio Status**, **HRV Balanced Range Lower**, and **HRV
+Balanced Range Upper**. Numeric sensors are measurement/statistics capable when
+Recorder includes them; no historical statistics are backfilled. The original HRV
+Baseline sensor keeps its meaning (`lowUpper`). Chronic-load attributes
+`source_chronic_min` and `source_chronic_max` preserve source field semantics;
+they are not confirmed acute-load optimal bounds.
+
+Optional **Core Data Status** and **Training Data Status** diagnostic sensors are
+disabled by default. Their `sources` attributes show endpoint outcomes; `partial`
+means at least one endpoint was empty, failed, or used a dated fallback.
+
+This additive change preserves existing unique IDs and requires no removal or
+reinstallation. New metrics/provenance require the matching `ha-garmin` enhancement
+to be released and pinned before deployment. No Recorder configuration change,
+nutrition feature, historical service, or persistent archive is included.
+
 The **Garmin Connect** integration connects your [Garmin Connect](https://connect.garmin.com/) cloud service to Home Assistant, enabling users to monitor their health and fitness data from Garmin wearable devices directly in Home Assistant.
 
 The integration provides **130+ sensors** across the following categories:
