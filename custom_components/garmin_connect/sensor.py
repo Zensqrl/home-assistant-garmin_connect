@@ -75,6 +75,91 @@ class GarminConnectSensorEntityDescription(SensorEntityDescription):
     """Retain last known value when API returns None (weight, sleep at midnight, etc)."""
 
 
+# Only mapped metrics have verified endpoint provenance. Unmapped entities retain
+# their existing behavior; never infer freshness from a successful overall poll.
+_P0_SOURCES = {
+    **dict.fromkeys(
+        (
+            "totalSteps",
+            "dailyStepGoal",
+            "restingHeartRate",
+            "lastSevenDaysAvgRestingHeartRate",
+            "averageStressLevel",
+            "maxStressLevel",
+            "stressQualifierText",
+            "activeKilocalories",
+            "bodyBatteryMostRecentValue",
+            "bodyBatteryHighestValue",
+            "bodyBatteryLowestValue",
+            "bodyBatteryChargedValue",
+            "bodyBatteryDrainedValue",
+            "sleepingMinutes",
+            "measurableAsleepDurationMinutes",
+            "measurableAwakeDurationMinutes",
+        ),
+        "summary",
+    ),
+    **dict.fromkeys(
+        (
+            "sleepScore",
+            "sleepTimeMinutes",
+            "deepSleepMinutes",
+            "lightSleepMinutes",
+            "remSleepMinutes",
+            "awakeSleepMinutes",
+            "napTimeMinutes",
+            "unmeasurableSleepMinutes",
+            "bedtime",
+            "wakeTime",
+            "sleepNeed",
+            "optimalBedtime",
+            "optimalWakeTime",
+            "avgSleepRespirationValue",
+        ),
+        "sleep",
+    ),
+    **dict.fromkeys(
+        ("yesterdaySteps", "yesterdayDistance", "weeklyStepAvg", "weeklyDistanceAvg"), "dailySteps"
+    ),
+    **dict.fromkeys(
+        (
+            "hrvStatusText",
+            "hrvWeeklyAvg",
+            "hrvLastNightAvg",
+            "hrvLastNight5MinHigh",
+            "hrvBaselineLowUpper",
+            "hrvBaselineBalancedLow",
+            "hrvBaselineBalancedUpper",
+        ),
+        "hrv",
+    ),
+    "trainingReadiness": "readiness",
+    "recoveryTime": "readiness",
+    "morningTrainingReadiness": "morningReadiness",
+    "trainingStatus": "trainingStatus",
+    **dict.fromkeys(
+        (
+            "acuteTrainingLoad",
+            "chronicTrainingLoad",
+            "trainingLoadRatio",
+            "trainingLoadRatioStatus",
+        ),
+        "trainingLoad",
+    ),
+}
+
+
+def _source_status(data: dict[str, Any]) -> str | None:
+    sources = data.get("_sources", {})
+    if not sources:
+        return None
+    return (
+        "ok"
+        if all(v.get("outcome") == "ok" and not v.get("fallback_used") for v in sources.values())
+        else "partial"
+    )
+
+
 # ── CORE coordinator sensors ─────────────────────────────────────────────────
 # Keys match ha_garmin.fetch_core_data() output (incl. _add_computed_fields).
 
@@ -86,6 +171,14 @@ ACTIVITY_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
         state_class=SensorStateClass.TOTAL_INCREASING,
         native_unit_of_measurement="steps",
         preserve_value=True,
+    ),
+    GarminConnectSensorEntityDescription(
+        key="coreDataStatus",
+        translation_key="core_data_status",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=_source_status,
+        attributes_fn=lambda data: {"sources": data.get("_sources", {})},
     ),
     GarminConnectSensorEntityDescription(
         key="dailyStepGoal",
@@ -832,9 +925,7 @@ ACTIVITY_TRACKING_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
         key="trainingPlanGoalEvent",
         translation_key="training_plan_goal_event",
         coordinator_type=CoordinatorType.ACTIVITY,
-        value_fn=lambda data: (data.get("trainingPlanGoalEvent") or {}).get(
-            "eventName"
-        ),
+        value_fn=lambda data: (data.get("trainingPlanGoalEvent") or {}).get("eventName"),
         attributes_fn=lambda data: data.get("trainingPlanGoalEvent") or {},
     ),
 )
@@ -844,6 +935,61 @@ ACTIVITY_TRACKING_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
 # Data from ha_garmin.fetch_training_data()
 
 TRAINING_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
+    GarminConnectSensorEntityDescription(
+        key="acuteTrainingLoad",
+        translation_key="acute_training_load",
+        coordinator_type=CoordinatorType.TRAINING,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+    ),
+    GarminConnectSensorEntityDescription(
+        key="chronicTrainingLoad",
+        translation_key="chronic_training_load",
+        coordinator_type=CoordinatorType.TRAINING,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+        attributes_fn=lambda data: {
+            "source_chronic_min": data.get("trainingLoadChronicMin"),
+            "source_chronic_max": data.get("trainingLoadChronicMax"),
+        },
+    ),
+    GarminConnectSensorEntityDescription(
+        key="trainingLoadRatio",
+        translation_key="training_load_ratio",
+        coordinator_type=CoordinatorType.TRAINING,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=2,
+    ),
+    GarminConnectSensorEntityDescription(
+        key="trainingLoadRatioStatus",
+        translation_key="training_load_ratio_status",
+        coordinator_type=CoordinatorType.TRAINING,
+    ),
+    GarminConnectSensorEntityDescription(
+        key="hrvBaselineBalancedLow",
+        translation_key="hrv_baseline_balanced_low",
+        coordinator_type=CoordinatorType.TRAINING,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="ms",
+        preserve_value=True,
+    ),
+    GarminConnectSensorEntityDescription(
+        key="hrvBaselineBalancedUpper",
+        translation_key="hrv_baseline_balanced_upper",
+        coordinator_type=CoordinatorType.TRAINING,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="ms",
+        preserve_value=True,
+    ),
+    GarminConnectSensorEntityDescription(
+        key="trainingDataStatus",
+        translation_key="training_data_status",
+        coordinator_type=CoordinatorType.TRAINING,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=_source_status,
+        attributes_fn=lambda data: {"sources": data.get("_sources", {})},
+    ),
     GarminConnectSensorEntityDescription(
         key="enduranceScore",
         translation_key="endurance_score",
@@ -1258,7 +1404,7 @@ def _parse_iso(value: str) -> datetime.datetime | None:
     """Parse an ISO datetime string, returning None on failure."""
     try:
         return datetime.datetime.fromisoformat(value)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return None
 
 
@@ -1273,8 +1419,7 @@ def _count_recent_activities(data: dict[str, Any]) -> int:
         [
             a
             for a in (data.get("lastActivities") or [])
-            if isinstance(a.get("startTime"), datetime.datetime)
-            and a["startTime"] >= cutoff
+            if isinstance(a.get("startTime"), datetime.datetime) and a["startTime"] >= cutoff
         ]
     )
 
@@ -1562,12 +1707,7 @@ def _menstrual_fertile_window_end(data: dict[str, Any]) -> dt_date | None:
     s = _menstrual_day_summary(data)
     fw_start = s.get("fertileWindowStart")
     fw_len = s.get("lengthOfFertileWindow")
-    if (
-        not isinstance(fw_start, int)
-        or fw_start <= 0
-        or not isinstance(fw_len, int)
-        or fw_len <= 0
-    ):
+    if not isinstance(fw_start, int) or fw_start <= 0 or not isinstance(fw_len, int) or fw_len <= 0:
         return None
     fertile_start = start_date + timedelta(days=fw_start - 1)
     return fertile_start + timedelta(days=fw_len - 1)
@@ -1809,7 +1949,7 @@ def _async_migrate_sleep_duration_entity_id(registry: er.EntityRegistry) -> None
             old_entity_id,
             new_entity_id="sensor.garmin_connect_sleep_duration",
         )
-    except (ValueError, KeyError):
+    except ValueError, KeyError:
         pass
 
 
@@ -1825,9 +1965,7 @@ def _async_migrate_gear_unique_ids(
         gear_uuid = gear_stat.get("uuid") or gear_stat.get("gearUuid", "")
         if not gear_uuid:
             continue
-        old_unique_id = (
-            f"{entry_id}_gear_{gear_name.lower().replace(' ', '_').replace('-', '_')}"
-        )
+        old_unique_id = f"{entry_id}_gear_{gear_name.lower().replace(' ', '_').replace('-', '_')}"
         if registry.async_get_entity_id("sensor", DOMAIN, old_unique_id) is None:
             continue
         new_unique_id = f"{entry_id}_gear_{gear_uuid}"
@@ -1952,35 +2090,63 @@ class GarminConnectSensor(CoordinatorEntity[BaseGarminCoordinator], SensorEntity
             entry_type=DeviceEntryType.SERVICE,
         )
         self._last_known_value: str | int | float | datetime.datetime | None = None
+        self._last_known_provenance: dict[str, Any] = {}
+        self._last_known_attributes: dict[str, Any] = {}
+
+    def _current_value(self) -> Any:
+        data = self.coordinator.data or {}
+        if self.entity_description.value_fn is not None:
+            return self.entity_description.value_fn(data) if data else None
+        return data.get(self.entity_description.key)
+
+    def _current_attributes(self) -> dict[str, Any]:
+        data = self.coordinator.data or {}
+        if data and self.entity_description.attributes_fn is not None:
+            return dict(self.entity_description.attributes_fn(data))
+        return {}
+
+    def _current_provenance(self) -> dict[str, Any]:
+        source = _P0_SOURCES.get(self.entity_description.key)
+        return dict((self.coordinator.data or {}).get("_sources", {}).get(source, {}))
 
     @property
     def native_value(self) -> str | int | float | datetime.datetime | None:
-        """Return the state of the sensor."""
-        if not self.coordinator.data:
-            return self._last_known_value if self.entity_description.preserve_value else None
-
-        if self.entity_description.value_fn is not None:
-            raw = self.entity_description.value_fn(self.coordinator.data)
-        else:
-            raw = self.coordinator.data.get(self.entity_description.key)
-
-        # Explicitly narrow the type for mypy
-        value = cast(str | int | float | datetime.datetime | None, raw)
-
+        """Return the existing value, preserving its provenance with its cache."""
+        value = cast(str | int | float | datetime.datetime | None, self._current_value())
         if value is None:
             return self._last_known_value if self.entity_description.preserve_value else None
-
         if self.entity_description.preserve_value:
             self._last_known_value = value
-
+            self._last_known_provenance = self._current_provenance()
+            self._last_known_attributes = self._current_attributes()
         return value
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional state attributes."""
-        if not self.coordinator.data or self.entity_description.attributes_fn is None:
-            return {}
-        return self.entity_description.attributes_fn(self.coordinator.data)
+        """Expose source freshness, keeping retained values paired with old metadata."""
+        # Resolve the value first so property access order cannot change provenance.
+        value = self.native_value
+        retained = (
+            self.entity_description.preserve_value
+            and value is not None
+            and self._current_value() is None
+        )
+        current = self._current_provenance()
+        provenance = dict(self._last_known_provenance if retained else current)
+        attrs = dict(
+            self._last_known_attributes if retained and provenance else self._current_attributes()
+        )
+        if provenance:
+            provenance.update(
+                {
+                    "retained": retained,
+                    "latest_outcome": current.get("outcome", "unknown"),
+                    "latest_fetch_at": current.get("fetched_at"),
+                    "coordinator_available": self.coordinator.last_update_success,
+                }
+            )
+            attrs["data_provenance"] = provenance
+        return attrs
 
 
 class GarminConnectGearSensor(CoordinatorEntity[GearCoordinator], SensorEntity):
@@ -2089,6 +2255,22 @@ class GarminConnectPowerToWeightSensor(CoordinatorEntity[TrainingCoordinator], S
             manufacturer="Garmin",
             entry_type=DeviceEntryType.SERVICE,
         )
+
+    @property
+    def suggested_object_id(self) -> str | None:
+        """Object id including the sport.
+
+        HA's default suggested_object_id doesn't resolve
+        translation_placeholders (issue #585) -- it uses a separate,
+        placeholder-unaware translation lookup from the one that renders
+        the display name, so every sport collapses to the same bare
+        "power to weight"/"ftp" string and HA numbers them _2, _3, ...
+        Only affects newly-registered entities; existing ones keep
+        whatever id they already have.
+        """
+        sport_display = self._sport.replace("_", " ").title()
+        prefix = "Power to Weight" if self._sensor_type == "ptw" else "FTP"
+        return f"{prefix} {sport_display}"
 
     def _get_entry(self) -> dict[str, Any] | None:
         """Return the powerToWeight entry for this sport, or None."""

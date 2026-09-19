@@ -16,6 +16,7 @@ from custom_components.garmin_connect.sensor import (
     TRAINING_SENSORS,
     CoordinatorType,
     GarminConnectGearSensor,
+    GarminConnectPowerToWeightSensor,
     GarminConnectSensor,
     GarminConnectSensorEntityDescription,
 )
@@ -524,7 +525,9 @@ def test_menstrual_cycle_start_returns_date_object() -> None:
     assert sensor.native_value == datetime.date.fromisoformat("2026-01-20")
 
 
-def test_menstrual_fertile_window_start_returns_none_when_fertile_window_start_is_less_than_or_zero() -> None:
+def test_menstrual_fertile_window_start_returns_none_when_fertile_window_start_is_less_than_or_zero() -> (
+    None
+):
     """Menstrual fertile window start sensor must return None when fertileWindowStart <= 0"""
     desc = next(d for d in MENSTRUAL_CYCLE_SENSORS if d.key == "menstrualFertileWindowStart")
     coord = MagicMock()
@@ -543,7 +546,7 @@ def test_menstrual_fertile_window_start_returns_none_when_fertile_window_start_i
                 "fertileWindowStart": 0,
                 "lutealPhaseStart": 12,
                 "cycleType": "REGULAR",
-                "predictedCycle": False
+                "predictedCycle": False,
             }
         }
     }
@@ -580,7 +583,9 @@ def test_menstrual_fertile_window_end_returns_none_when_missing() -> None:
     assert sensor.native_value is None
 
 
-def test_menstrual_fertile_window_end_returns_none_when_fertile_window_start_is_less_than_or_zero() -> None:
+def test_menstrual_fertile_window_end_returns_none_when_fertile_window_start_is_less_than_or_zero() -> (
+    None
+):
     """Menstrual fertile window end sensor must return None when fertileWindowStart <= 0."""
     desc = next(d for d in MENSTRUAL_CYCLE_SENSORS if d.key == "menstrualFertileWindowEnd")
     coord = MagicMock()
@@ -599,7 +604,7 @@ def test_menstrual_fertile_window_end_returns_none_when_fertile_window_start_is_
                 "fertileWindowStart": 0,
                 "lutealPhaseStart": 12,
                 "cycleType": "REGULAR",
-                "predictedCycle": False
+                "predictedCycle": False,
             }
         }
     }
@@ -607,7 +612,9 @@ def test_menstrual_fertile_window_end_returns_none_when_fertile_window_start_is_
     assert sensor.native_value is None
 
 
-def test_menstrual_fertile_window_end_returns_none_when_length_of_fertile_window_is_less_than_or_zero() -> None:
+def test_menstrual_fertile_window_end_returns_none_when_length_of_fertile_window_is_less_than_or_zero() -> (
+    None
+):
     """Menstrual fertile window end sensor must return None when lengthOfFertileWindow <= 0."""
     desc = next(d for d in MENSTRUAL_CYCLE_SENSORS if d.key == "menstrualFertileWindowEnd")
     coord = MagicMock()
@@ -626,7 +633,7 @@ def test_menstrual_fertile_window_end_returns_none_when_length_of_fertile_window
                 "fertileWindowStart": 5,
                 "lutealPhaseStart": 12,
                 "cycleType": "REGULAR",
-                "predictedCycle": False
+                "predictedCycle": False,
             }
         }
     }
@@ -667,10 +674,10 @@ def test_menstrual_next_predicted_cycle_start_returns_none_when_missing(mock_dat
                 "educationContentMod": 11,
                 "lutealPhaseStart": 12,
                 "cycleType": "REGULAR",
-                "predictedCycle": False
+                "predictedCycle": False,
             }
         },
-         "menstrualCalendar": {
+        "menstrualCalendar": {
             "cycleSummaries": [
                 {
                     "startDate": "2026-11-29",
@@ -678,10 +685,10 @@ def test_menstrual_next_predicted_cycle_start_returns_none_when_missing(mock_dat
                     "fertileWindowStart": 9,
                     "lengthOfFertileWindow": 5,
                     "educationContentMod": 9,
-                    "predictedCycle": False
+                    "predictedCycle": False,
                 }
             ]
-        }
+        },
     }
     sensor = GarminConnectSensor(coord, desc, "entry_id")
     assert sensor.native_value is None
@@ -697,7 +704,9 @@ def test_menstrual_next_predicted_cycle_start_returns_none_when_present_and_in_t
 
 
 @patch("custom_components.garmin_connect.sensor.dt_date")
-def test_menstrual_next_predicted_cycle_start_returns_date_object_when_present_and_in_future(mock_date) -> None:
+def test_menstrual_next_predicted_cycle_start_returns_date_object_when_present_and_in_future(
+    mock_date,
+) -> None:
     """Menstrual next predicted cycle start sensor must return first predicted cycle >= today as date object."""
     import datetime
 
@@ -727,7 +736,7 @@ def test_menstrual_cycle_day_attributes_return_empty_when_missing() -> None:
                 "educationContentMod": 11,
                 "lutealPhaseStart": 12,
                 "cycleType": "REGULAR",
-                "predictedCycle": False
+                "predictedCycle": False,
             }
         }
     }
@@ -799,6 +808,41 @@ def test_gear_sensor_none_when_no_data() -> None:
     assert sensor.native_value is None
 
 
+# ── GarminConnectPowerToWeightSensor ──────────────────────────────────────────
+
+
+def test_power_to_weight_suggested_object_id_includes_sport() -> None:
+    """suggested_object_id must carry the sport (#585) -- translation
+    placeholders aren't resolved by HA's default implementation, so this
+    is the fix, not the built-in behavior."""
+    coord = MagicMock()
+    sensor = GarminConnectPowerToWeightSensor(
+        coord, sport="cross_country_skiing", sensor_type="ptw", entry_id="eid"
+    )
+    assert sensor.suggested_object_id == "Power to Weight Cross Country Skiing"
+
+
+def test_ftp_suggested_object_id_includes_sport() -> None:
+    """Same fix, FTP variant."""
+    coord = MagicMock()
+    sensor = GarminConnectPowerToWeightSensor(
+        coord, sport="cycling", sensor_type="ftp", entry_id="eid"
+    )
+    assert sensor.suggested_object_id == "FTP Cycling"
+
+
+def test_power_sensors_suggested_object_ids_unique_across_sports() -> None:
+    """Different sports of the same sensor_type must not collide."""
+    coord = MagicMock()
+    ids = {
+        GarminConnectPowerToWeightSensor(
+            coord, sport=sport, sensor_type="ftp", entry_id="eid"
+        ).suggested_object_id
+        for sport in ("running", "cycling", "cross_country_skiing")
+    }
+    assert len(ids) == 3
+
+
 def test_gear_sensor_attributes() -> None:
     """Gear sensor attributes must expose gear_uuid, total_activities and make/model."""
     coord = MagicMock()
@@ -853,15 +897,12 @@ def test_gear_sensor_unique_id_unnamed_gear_no_collision() -> None:
 
 def _route_sensor(points: int) -> GarminConnectSensor:
     """Build the real lastActivityRoute sensor over a polyline of N points."""
-    description = next(
-        d for d in ACTIVITY_TRACKING_SENSORS if d.key == "lastActivityRoute"
-    )
+    description = next(d for d in ACTIVITY_TRACKING_SENSORS if d.key == "lastActivityRoute")
     coord = MagicMock()
     coord.data = {
         "lastActivity": {
             "polyline": [
-                {"lat": 19.4326 + i / 100000, "lon": -99.1332 + i / 100000}
-                for i in range(points)
+                {"lat": 19.4326 + i / 100000, "lon": -99.1332 + i / 100000} for i in range(points)
             ],
             "hasPolyline": True,
             "activityName": "Morning Ride",
@@ -878,9 +919,7 @@ def _recorded_attributes(sensor: GarminConnectSensor) -> bytes:
 
     # Mirrors Entity.async_internal_added_to_hass, which publishes the union of the
     # component-level and entity-level unrecorded attributes onto the state.
-    unrecorded = (
-        sensor._entity_component_unrecorded_attributes | sensor._unrecorded_attributes
-    )
+    unrecorded = sensor._entity_component_unrecorded_attributes | sensor._unrecorded_attributes
     state = State(
         "sensor.garmin_connect_last_activity_route",
         str(sensor.native_value),
