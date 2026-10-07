@@ -1,29 +1,31 @@
 version: 2
 updates:
-  - package-ecosystem: "devcontainers"
-    directory: "/"
-    labels:
-      - "pr: dependency-update"
-    schedule:
-      interval: weekly
-      time: "06:00"
-    open-pull-requests-limit: 10
   - package-ecosystem: "github-actions"
     directory: "/"
     labels:
       - "pr: dependency-update"
+    groups:
+      minor-and-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
     schedule:
       interval: weekly
       time: "06:00"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
   - package-ecosystem: pip
     directory: "/"
     labels:
       - "pr: dependency-update"
+    groups:
+      minor-and-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
     schedule:
       interval: weekly
       time: "06:00"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
     ignore:
       # Dependabot should not update Home Assistant as that should match the homeassistant key in hacs.json
       - dependency-name: "homeassistant"
