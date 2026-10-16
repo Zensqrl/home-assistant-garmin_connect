@@ -1,8 +1,11 @@
 """Tests for Garmin Connect services."""
 
+from datetime import UTC, date, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+from zoneinfo import ZoneInfo
 
+import probatio as vol
 import pytest
 from aiohttp import ClientError
 from ha_garmin import GarminConnectError
@@ -10,8 +13,14 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.garmin_connect.const import DOMAIN
 from custom_components.garmin_connect.services import (
+    ADD_BLOOD_PRESSURE_SCHEMA,
+    ADD_BODY_COMPOSITION_SCHEMA,
+    ADD_HYDRATION_SCHEMA,
+    ADD_NUTRITION_SCHEMA,
+    CREATE_ACTIVITY_SCHEMA,
+    CREATE_WORKOUT_SCHEMA,
+    DELETE_WORKOUT_SCHEMA,
     async_setup_services,
-    async_unload_services,
 )
 
 
@@ -20,6 +29,9 @@ def mock_hass() -> MagicMock:
     """Return a mock Home Assistant instance with a loaded config entry."""
     hass = MagicMock()
     hass.config.time_zone = "Europe/Amsterdam"
+    hass.config.config_dir = "/nonexistent/config"
+    hass.config.is_allowed_path.return_value = True
+    hass.async_add_executor_job = AsyncMock(side_effect=lambda func, *args: func(*args))
 
     mock_entry = _make_entry("entry_1", "profile_1", "user1@example.com")
 
@@ -32,6 +44,7 @@ def _make_entry(entry_id: str, unique_id: str, title: str) -> MagicMock:
     mock_client = AsyncMock()
     mock_coordinators = MagicMock()
     mock_coordinators.core.client = mock_client
+    mock_coordinators.activity.async_request_refresh = AsyncMock()
 
     mock_entry = MagicMock()
     mock_entry.entry_id = entry_id
@@ -64,8 +77,8 @@ def _get_client_for_entry(mock_hass: MagicMock, entry_id: str) -> AsyncMock:
 
 
 async def test_setup_registers_all_services(mock_hass: MagicMock) -> None:
-    """async_setup_services must register all 9 service handlers."""
-    await async_setup_services(mock_hass)
+    """async_setup_services must register all 14 service handlers."""
+    async_setup_services(mock_hass)
 
     registered = {call[0][1] for call in mock_hass.services.async_register.call_args_list}
     assert registered == {
@@ -78,24 +91,11 @@ async def test_setup_registers_all_services(mock_hass: MagicMock) -> None:
         "add_gear_to_activity",
         "add_hydration",
         "add_nutrition_log",
-    }
-
-
-async def test_unload_removes_all_services(mock_hass: MagicMock) -> None:
-    """async_unload_services must remove all 9 services."""
-    await async_unload_services(mock_hass)
-
-    removed = {call[0][1] for call in mock_hass.services.async_remove.call_args_list}
-    assert removed == {
-        "set_active_gear",
-        "add_body_composition",
-        "add_blood_pressure",
-        "create_activity",
-        "upload_activity",
-        "download_activity",
-        "add_gear_to_activity",
-        "add_hydration",
-        "add_nutrition_log",
+        "create_workout",
+        "update_workout",
+        "delete_workout",
+        "schedule_workout",
+        "unschedule_workout",
     }
 
 
@@ -103,7 +103,7 @@ async def test_service_no_entry_raises(mock_hass: MagicMock) -> None:
     """Services must raise HomeAssistantError when no config entry exists."""
     mock_hass.config_entries.async_entries.return_value = []
 
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_body_composition")
 
     call = MagicMock()
@@ -119,7 +119,7 @@ async def test_service_entry_not_loaded_raises(mock_hass: MagicMock) -> None:
     mock_entry.runtime_data = None
     mock_hass.config_entries.async_entries.return_value = [mock_entry]
 
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_body_composition")
 
     call = MagicMock()
@@ -136,7 +136,7 @@ async def test_service_multiple_entries_without_entity_id_raises(
     second_entry = _make_entry("entry_2", "profile_2", "user2@example.com")
     mock_hass.config_entries.async_entries.return_value.append(second_entry)
 
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_body_composition")
 
     call = MagicMock()
@@ -148,7 +148,7 @@ async def test_service_multiple_entries_without_entity_id_raises(
 
 async def test_set_active_gear_by_uuid(mock_hass: MagicMock) -> None:
     """set_active_gear must call client with the supplied gear_uuid."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "set_active_gear")
     client = _get_client(mock_hass)
 
@@ -170,7 +170,7 @@ async def test_set_active_gear_by_uuid(mock_hass: MagicMock) -> None:
 
 async def test_set_active_gear_by_entity_id(mock_hass: MagicMock) -> None:
     """set_active_gear must resolve gear_uuid from entity state attributes."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "set_active_gear")
 
     state = MagicMock()
@@ -213,7 +213,7 @@ async def test_set_active_gear_by_entity_id_targets_entity_account(
     registry_entry = MagicMock()
     registry_entry.config_entry_id = "entry_2"
 
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "set_active_gear")
     first_client = _get_client_for_entry(mock_hass, "entry_1")
     second_client = _get_client_for_entry(mock_hass, "entry_2")
@@ -239,7 +239,7 @@ async def test_set_active_gear_by_entity_id_targets_entity_account(
 
 async def test_set_active_gear_no_gear_raises(mock_hass: MagicMock) -> None:
     """set_active_gear must raise when neither uuid nor entity_id given."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "set_active_gear")
 
     call = MagicMock()
@@ -251,7 +251,7 @@ async def test_set_active_gear_no_gear_raises(mock_hass: MagicMock) -> None:
 
 async def test_set_active_gear_entity_not_found_raises(mock_hass: MagicMock) -> None:
     """set_active_gear must raise when entity doesn't exist."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "set_active_gear")
 
     mock_hass.states.get.return_value = None
@@ -269,7 +269,7 @@ async def test_set_active_gear_entity_not_found_raises(mock_hass: MagicMock) -> 
 
 async def test_set_active_gear_entity_no_uuid_raises(mock_hass: MagicMock) -> None:
     """set_active_gear must raise when entity has no gear_uuid attribute."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "set_active_gear")
 
     state = MagicMock()
@@ -289,7 +289,7 @@ async def test_set_active_gear_entity_no_uuid_raises(mock_hass: MagicMock) -> No
 
 async def test_add_body_composition(mock_hass: MagicMock) -> None:
     """add_body_composition must call client with the supplied fields."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_body_composition")
     client = _get_client(mock_hass)
 
@@ -319,7 +319,7 @@ async def test_add_body_composition_targets_entity_config_entry(
     registry_entry = MagicMock()
     registry_entry.config_entry_id = "entry_2"
 
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_body_composition")
     first_client = _get_client_for_entry(mock_hass, "entry_1")
     second_client = _get_client_for_entry(mock_hass, "entry_2")
@@ -343,7 +343,7 @@ async def test_add_body_composition_entity_not_found_raises(
     mock_hass: MagicMock,
 ):
     """add_body_composition must raise when the requested entity is unknown."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_body_composition")
 
     call = MagicMock()
@@ -357,7 +357,7 @@ async def test_add_body_composition_entity_not_found_raises(
 
 async def test_add_body_composition_api_error_raises(mock_hass: MagicMock) -> None:
     """add_body_composition must wrap API errors in HomeAssistantError."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_body_composition")
     client = _get_client(mock_hass)
     client.add_body_composition.side_effect = GarminConnectError("API error")
@@ -371,7 +371,7 @@ async def test_add_body_composition_api_error_raises(mock_hass: MagicMock) -> No
 
 async def test_add_blood_pressure(mock_hass: MagicMock) -> None:
     """add_blood_pressure must call client.set_blood_pressure with correct args."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_blood_pressure")
     client = _get_client(mock_hass)
 
@@ -396,7 +396,7 @@ async def test_add_blood_pressure(mock_hass: MagicMock) -> None:
 
 async def test_add_blood_pressure_without_pulse(mock_hass: MagicMock) -> None:
     """add_blood_pressure must allow omitting pulse, matching Garmin Connect's own app."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_blood_pressure")
     client = _get_client(mock_hass)
 
@@ -416,7 +416,7 @@ async def test_add_blood_pressure_without_pulse(mock_hass: MagicMock) -> None:
 
 async def test_add_blood_pressure_wraps_exception(mock_hass: MagicMock) -> None:
     """add_blood_pressure must wrap API errors in HomeAssistantError."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_blood_pressure")
     client = _get_client(mock_hass)
     client.set_blood_pressure.side_effect = ClientError("network error")
@@ -429,8 +429,8 @@ async def test_add_blood_pressure_wraps_exception(mock_hass: MagicMock) -> None:
 
 
 async def test_create_activity(mock_hass: MagicMock) -> None:
-    """create_activity must forward all fields and append .000 to start_datetime."""
-    await async_setup_services(mock_hass)
+    """create_activity must forward all fields and format start_datetime with milliseconds."""
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "create_activity")
     client = _get_client(mock_hass)
 
@@ -438,7 +438,7 @@ async def test_create_activity(mock_hass: MagicMock) -> None:
     call.data = {
         "activity_name": "Morning Run",
         "activity_type": "running",
-        "start_datetime": "2026-01-24T08:00:00",
+        "start_datetime": datetime(2026, 1, 24, 8, 0, 0),
         "duration_min": 30,
         "distance_km": 5.0,
     }
@@ -457,7 +457,7 @@ async def test_create_activity(mock_hass: MagicMock) -> None:
 
 async def test_create_activity_defaults_to_now(mock_hass: MagicMock) -> None:
     """create_activity must generate a start_datetime when not supplied."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "create_activity")
     client = _get_client(mock_hass)
 
@@ -477,7 +477,7 @@ async def test_create_activity_defaults_to_now(mock_hass: MagicMock) -> None:
 
 async def test_upload_activity(mock_hass: MagicMock, tmp_path: Path) -> None:
     """upload_activity must call client.upload_activity when the file exists."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "upload_activity")
     client = _get_client(mock_hass)
 
@@ -494,7 +494,7 @@ async def test_upload_activity(mock_hass: MagicMock, tmp_path: Path) -> None:
 
 async def test_upload_activity_file_not_found_raises(mock_hass: MagicMock) -> None:
     """upload_activity must raise HomeAssistantError when file doesn't exist."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "upload_activity")
 
     call = MagicMock()
@@ -506,7 +506,7 @@ async def test_upload_activity_file_not_found_raises(mock_hass: MagicMock) -> No
 
 async def test_download_activity_default_path(mock_hass: MagicMock, tmp_path: Path) -> None:
     """download_activity must save the file under <config>/garmin_activities and return response."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "download_activity")
     client = _get_client(mock_hass)
     client.download_activity.return_value = b"fake fit data"
@@ -535,7 +535,7 @@ async def test_download_activity_original_gets_zip_extension(
     mock_hass: MagicMock, tmp_path: Path
 ) -> None:
     """download_activity original format must save with .zip extension."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "download_activity")
     client = _get_client(mock_hass)
     client.download_activity.return_value = b"PK zip data"
@@ -557,7 +557,7 @@ async def test_download_activity_custom_path_not_allowed_raises(
     mock_hass: MagicMock,
 ) -> None:
     """download_activity must raise when a custom path is outside allowlist_external_dirs."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "download_activity")
 
     mock_hass.config.is_allowed_path.return_value = False
@@ -575,7 +575,7 @@ async def test_download_activity_custom_path_not_allowed_raises(
 
 async def test_download_activity_client_error_raises(mock_hass: MagicMock) -> None:
     """download_activity must wrap client errors in HomeAssistantError."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "download_activity")
     client = _get_client(mock_hass)
     client.download_activity.side_effect = ClientError("boom")
@@ -589,7 +589,7 @@ async def test_download_activity_client_error_raises(mock_hass: MagicMock) -> No
 
 async def test_add_gear_to_activity_by_uuid(mock_hass: MagicMock) -> None:
     """add_gear_to_activity must call client with gear_uuid and activity_id."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_gear_to_activity")
     client = _get_client(mock_hass)
 
@@ -606,7 +606,7 @@ async def test_add_gear_to_activity_by_uuid(mock_hass: MagicMock) -> None:
 
 async def test_add_gear_to_activity_by_entity(mock_hass: MagicMock) -> None:
     """add_gear_to_activity must resolve uuid from entity state attributes."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_gear_to_activity")
     client = _get_client(mock_hass)
 
@@ -632,7 +632,7 @@ async def test_add_gear_to_activity_by_entity(mock_hass: MagicMock) -> None:
 
 async def test_add_gear_to_activity_no_gear_raises(mock_hass: MagicMock) -> None:
     """add_gear_to_activity must raise when no gear is specified."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_gear_to_activity")
 
     call = MagicMock()
@@ -644,7 +644,7 @@ async def test_add_gear_to_activity_no_gear_raises(mock_hass: MagicMock) -> None
 
 async def test_add_hydration(mock_hass: MagicMock) -> None:
     """add_hydration must call client.set_hydration with value_in_ml."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_hydration")
     client = _get_client(mock_hass)
 
@@ -661,24 +661,46 @@ async def test_add_hydration(mock_hass: MagicMock) -> None:
 
 async def test_add_hydration_with_timestamp(mock_hass: MagicMock) -> None:
     """add_hydration must forward an optional timestamp to the client."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_hydration")
     client = _get_client(mock_hass)
 
     call = MagicMock()
-    call.data = {"value_in_ml": 500.0, "timestamp": "2026-01-24T10:00:00"}
+    call.data = {"value_in_ml": 500.0, "timestamp": datetime(2026, 1, 24, 10, 0, 0)}
+
+    # A naive timestamp is HA-local wall-clock time, not the process zone.
+    with patch(
+        "custom_components.garmin_connect.services.dt_util.get_default_time_zone",
+        return_value=ZoneInfo("Europe/Istanbul"),
+    ):
+        await handler(call)
+
+    client.set_hydration.assert_awaited_once_with(
+        value_in_ml=500.0,
+        timestamp="2026-01-24T10:00:00+03:00",
+    )
+
+
+async def test_add_hydration_keeps_aware_timestamp(mock_hass: MagicMock) -> None:
+    """An aware timestamp is forwarded unchanged."""
+    async_setup_services(mock_hass)
+    handler = _get_handler(mock_hass, "add_hydration")
+    client = _get_client(mock_hass)
+
+    call = MagicMock()
+    call.data = {"value_in_ml": 500.0, "timestamp": datetime(2026, 1, 24, 10, 0, tzinfo=UTC)}
 
     await handler(call)
 
     client.set_hydration.assert_awaited_once_with(
         value_in_ml=500.0,
-        timestamp="2026-01-24T10:00:00",
+        timestamp="2026-01-24T10:00:00+00:00",
     )
 
 
 async def test_add_hydration_negative_value(mock_hass: MagicMock) -> None:
     """add_hydration must accept negative values to subtract intake."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_hydration")
     client = _get_client(mock_hass)
 
@@ -695,7 +717,7 @@ async def test_add_hydration_negative_value(mock_hass: MagicMock) -> None:
 
 async def test_add_hydration_wraps_exception(mock_hass: MagicMock) -> None:
     """add_hydration must wrap API errors in HomeAssistantError."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_hydration")
     client = _get_client(mock_hass)
     client.set_hydration.side_effect = GarminConnectError("API error")
@@ -709,7 +731,7 @@ async def test_add_hydration_wraps_exception(mock_hass: MagicMock) -> None:
 
 async def test_add_nutrition_log(mock_hass: MagicMock) -> None:
     """add_nutrition_log must call client.add_nutrition_log with required calories."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_nutrition_log")
     client = _get_client(mock_hass)
 
@@ -730,7 +752,7 @@ async def test_add_nutrition_log(mock_hass: MagicMock) -> None:
 
 async def test_add_nutrition_log_all_fields(mock_hass: MagicMock) -> None:
     """add_nutrition_log must forward all optional macros and fields."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_nutrition_log")
     client = _get_client(mock_hass)
 
@@ -741,10 +763,14 @@ async def test_add_nutrition_log_all_fields(mock_hass: MagicMock) -> None:
         "protein": 35.0,
         "fat": 20.0,
         "name": "Lunch",
-        "timestamp": "2026-04-22T12:30:00",
+        "timestamp": datetime(2026, 4, 22, 12, 30, 0),
     }
 
-    await handler(call)
+    with patch(
+        "custom_components.garmin_connect.services.dt_util.get_default_time_zone",
+        return_value=ZoneInfo("Europe/Istanbul"),
+    ):
+        await handler(call)
 
     client.add_nutrition_log.assert_awaited_once_with(
         calories=650.0,
@@ -752,13 +778,13 @@ async def test_add_nutrition_log_all_fields(mock_hass: MagicMock) -> None:
         protein=35.0,
         fat=20.0,
         name="Lunch",
-        timestamp="2026-04-22T12:30:00",
+        timestamp="2026-04-22T12:30:00+03:00",
     )
 
 
 async def test_add_nutrition_log_wraps_exception(mock_hass: MagicMock) -> None:
     """add_nutrition_log must wrap API errors in HomeAssistantError."""
-    await async_setup_services(mock_hass)
+    async_setup_services(mock_hass)
     handler = _get_handler(mock_hass, "add_nutrition_log")
     client = _get_client(mock_hass)
     client.add_nutrition_log.side_effect = GarminConnectError("API error")
@@ -768,3 +794,346 @@ async def test_add_nutrition_log_wraps_exception(mock_hass: MagicMock) -> None:
 
     with pytest.raises(HomeAssistantError):
         await handler(call)
+
+
+# ── Input validation ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        ADD_BODY_COMPOSITION_SCHEMA,
+        ADD_BLOOD_PRESSURE_SCHEMA,
+        ADD_HYDRATION_SCHEMA,
+        ADD_NUTRITION_SCHEMA,
+    ],
+)
+def test_timestamp_must_be_a_datetime(schema: vol.Schema) -> None:
+    """A malformed timestamp is rejected by the schema, not by the library."""
+    base = {"weight": 80.0, "systolic": 120, "diastolic": 80, "value_in_ml": 100, "calories": 100}
+    data = {k: v for k, v in base.items() if k in {str(key) for key in schema.schema}}
+    with pytest.raises(vol.Invalid):
+        schema({**data, "timestamp": "yesterday at noon"})
+    assert isinstance(schema({**data, "timestamp": "2026-01-24T10:00:00"})["timestamp"], datetime)
+
+
+def test_body_composition_schema_enforces_ranges() -> None:
+    with pytest.raises(vol.Invalid):
+        ADD_BODY_COMPOSITION_SCHEMA({"weight": 5})
+    with pytest.raises(vol.Invalid):
+        ADD_BODY_COMPOSITION_SCHEMA({"weight": 80, "percent_fat": 95})
+    assert ADD_BODY_COMPOSITION_SCHEMA({"weight": "80.5"})["weight"] == 80.5
+
+
+def test_hydration_schema_enforces_library_limit() -> None:
+    with pytest.raises(vol.Invalid):
+        ADD_HYDRATION_SCHEMA({"value_in_ml": 20000})
+    assert ADD_HYDRATION_SCHEMA({"value_in_ml": -150})["value_in_ml"] == -150
+
+
+def test_create_activity_schema_rejects_negative_distance_and_bad_time_zone() -> None:
+    base = {"activity_name": "Run", "activity_type": "running", "duration_min": 10}
+    with pytest.raises(vol.Invalid):
+        CREATE_ACTIVITY_SCHEMA({**base, "distance_km": -1})
+    with pytest.raises(vol.Invalid):
+        CREATE_ACTIVITY_SCHEMA({**base, "time_zone": "Mars/Olympus"})
+    assert CREATE_ACTIVITY_SCHEMA({**base, "time_zone": "Europe/Berlin"})["time_zone"] == (
+        "Europe/Berlin"
+    )
+
+
+async def test_create_activity_converts_aware_start_to_activity_time_zone(
+    mock_hass: MagicMock,
+) -> None:
+    """An aware start time is expressed as wall-clock time in the activity's zone."""
+    async_setup_services(mock_hass)
+    handler = _get_handler(mock_hass, "create_activity")
+    client = _get_client(mock_hass)
+
+    call = MagicMock()
+    call.data = {
+        "activity_name": "Run",
+        "activity_type": "running",
+        "start_datetime": datetime(2026, 1, 24, 7, 0, 0, tzinfo=UTC),
+        "duration_min": 30,
+    }
+
+    await handler(call)
+
+    kwargs = client.create_activity.call_args.kwargs
+    assert kwargs["time_zone"] == "Europe/Amsterdam"
+    assert kwargs["start_datetime"] == "2026-01-24T08:00:00.000"
+
+
+async def test_library_value_error_becomes_home_assistant_error(mock_hass: MagicMock) -> None:
+    async_setup_services(mock_hass)
+    handler = _get_handler(mock_hass, "add_hydration")
+    client = _get_client(mock_hass)
+    client.set_hydration.side_effect = ValueError("too much")
+
+    call = MagicMock()
+    call.data = {"value_in_ml": 100.0}
+
+    with pytest.raises(HomeAssistantError):
+        await handler(call)
+
+
+async def test_upload_activity_path_not_allowed_raises(
+    mock_hass: MagicMock, tmp_path: Path
+) -> None:
+    """Files outside allowlist_external_dirs must never be sent to Garmin."""
+    async_setup_services(mock_hass)
+    handler = _get_handler(mock_hass, "upload_activity")
+    client = _get_client(mock_hass)
+    mock_hass.config.is_allowed_path.return_value = False
+
+    fit_file = tmp_path / "activity.fit"
+    fit_file.write_bytes(b"fake fit data")
+    call = MagicMock()
+    call.data = {"file_path": str(fit_file)}
+
+    with pytest.raises(HomeAssistantError):
+        await handler(call)
+    client.upload_activity.assert_not_awaited()
+
+
+async def test_upload_activity_inside_config_dir_needs_no_allowlist(
+    mock_hass: MagicMock, tmp_path: Path
+) -> None:
+    """The config dir is not in allowlist_external_dirs by default, yet must stay uploadable."""
+    async_setup_services(mock_hass)
+    handler = _get_handler(mock_hass, "upload_activity")
+    client = _get_client(mock_hass)
+    mock_hass.config.config_dir = str(tmp_path)
+    mock_hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
+    mock_hass.config.is_allowed_path.return_value = False
+
+    (tmp_path / "activity.fit").write_bytes(b"fake fit data")
+    call = MagicMock()
+    call.data = {"file_path": "activity.fit"}
+
+    await handler(call)
+
+    client.upload_activity.assert_awaited_once_with(str(tmp_path / "activity.fit"))
+    mock_hass.config.is_allowed_path.assert_not_called()
+
+
+async def test_upload_activity_symlink_out_of_config_dir_needs_allowlist(
+    mock_hass: MagicMock, tmp_path: Path
+) -> None:
+    """A symlink inside the config dir must not bypass the allowlist for its target."""
+    async_setup_services(mock_hass)
+    handler = _get_handler(mock_hass, "upload_activity")
+    client = _get_client(mock_hass)
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    mock_hass.config.config_dir = str(config_dir)
+    mock_hass.config.is_allowed_path.return_value = False
+
+    outside = tmp_path / "secret.fit"
+    outside.write_bytes(b"fake fit data")
+    (config_dir / "link.fit").symlink_to(outside)
+    call = MagicMock()
+    call.data = {"file_path": str(config_dir / "link.fit")}
+
+    with pytest.raises(HomeAssistantError):
+        await handler(call)
+    client.upload_activity.assert_not_awaited()
+
+
+async def test_upload_activity_unsupported_format_raises(
+    mock_hass: MagicMock, tmp_path: Path
+) -> None:
+    async_setup_services(mock_hass)
+    handler = _get_handler(mock_hass, "upload_activity")
+    client = _get_client(mock_hass)
+
+    other = tmp_path / "notes.txt"
+    other.write_text("hello")
+    call = MagicMock()
+    call.data = {"file_path": str(other)}
+
+    with pytest.raises(HomeAssistantError):
+        await handler(call)
+    client.upload_activity.assert_not_awaited()
+
+
+# ── Workouts ──────────────────────────────────────────────────────────────────
+
+_WORKOUT = {"workoutName": "Easy", "sportType": {"sportTypeKey": "running"}}
+
+
+def _activity_refresh(mock_hass: MagicMock) -> AsyncMock:
+    entry = mock_hass.config_entries.async_entries.return_value[0]
+    return entry.runtime_data.activity.async_request_refresh
+
+
+async def test_create_workout_returns_id_and_refreshes(mock_hass: MagicMock):
+    async_setup_services(mock_hass)
+    handler = _get_handler(mock_hass, "create_workout")
+    client = _get_client(mock_hass)
+    client.create_workout.return_value = {"workoutId": 42}
+
+    call = MagicMock()
+    call.data = {"workout": _WORKOUT}
+    call.return_response = True
+    assert await handler(call) == {"workout_id": 42}
+
+    client.create_workout.assert_awaited_once_with(_WORKOUT)
+    client.schedule_workout.assert_not_awaited()
+    _activity_refresh(mock_hass).assert_awaited_once()
+
+
+async def test_create_workout_with_date_schedules_it(mock_hass: MagicMock):
+    async_setup_services(mock_hass)
+    handler = _get_handler(mock_hass, "create_workout")
+    client = _get_client(mock_hass)
+    client.create_workout.return_value = {"workoutId": 42}
+    client.schedule_workout.return_value = {"workoutScheduleId": 7}
+
+    call = MagicMock()
+    call.data = {"workout": _WORKOUT, "date": date(2026, 10, 16)}
+    call.return_response = True
+    assert await handler(call) == {"workout_id": 42, "schedule_id": 7, "date": "2026-10-16"}
+    client.schedule_workout.assert_awaited_once_with(42, date(2026, 10, 16))
+
+
+async def test_create_workout_without_id_cannot_schedule(mock_hass: MagicMock):
+    async_setup_services(mock_hass)
+    handler = _get_handler(mock_hass, "create_workout")
+    client = _get_client(mock_hass)
+    client.create_workout.return_value = {}
+
+    call = MagicMock()
+    call.data = {"workout": _WORKOUT, "date": date(2026, 10, 16)}
+    with pytest.raises(HomeAssistantError) as exc:
+        await handler(call)
+    assert exc.value.translation_key == "create_workout_failed"
+    client.schedule_workout.assert_not_awaited()
+
+
+async def test_schedule_workout_response(mock_hass: MagicMock):
+    async_setup_services(mock_hass)
+    handler = _get_handler(mock_hass, "schedule_workout")
+    client = _get_client(mock_hass)
+    client.schedule_workout.return_value = {"workoutScheduleId": 7, "workout": {}}
+
+    call = MagicMock()
+    call.data = {"workout_id": 42, "date": date(2026, 10, 16)}
+    call.return_response = True
+    assert await handler(call) == {"schedule_id": 7, "workout_id": 42, "date": "2026-10-16"}
+    client.schedule_workout.assert_awaited_once_with(
+        workout_id=42, schedule_date=date(2026, 10, 16)
+    )
+    _activity_refresh(mock_hass).assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("service", "data", "method", "kwargs"),
+    [
+        (
+            "update_workout",
+            {"workout_id": 42, "workout": _WORKOUT},
+            "update_workout",
+            {"workout_id": 42, "workout": _WORKOUT},
+        ),
+        ("delete_workout", {"workout_id": 42}, "delete_workout", {"workout_id": 42}),
+        (
+            "unschedule_workout",
+            {"schedule_id": 7},
+            "unschedule_workout",
+            {"scheduled_workout_id": 7},
+        ),
+    ],
+)
+async def test_workout_writes_call_client_and_refresh(mock_hass, service, data, method, kwargs):
+    async_setup_services(mock_hass)
+    handler = _get_handler(mock_hass, service)
+    client = _get_client(mock_hass)
+
+    call = MagicMock()
+    call.data = data
+    await handler(call)
+
+    getattr(client, method).assert_awaited_once_with(**kwargs)
+    _activity_refresh(mock_hass).assert_awaited_once()
+
+
+async def test_workout_error_wrapped_without_refresh(mock_hass: MagicMock):
+    async_setup_services(mock_hass)
+    handler = _get_handler(mock_hass, "delete_workout")
+    client = _get_client(mock_hass)
+    client.delete_workout.side_effect = GarminConnectError("boom")
+
+    call = MagicMock()
+    call.data = {"workout_id": 42}
+    with pytest.raises(HomeAssistantError) as exc:
+        await handler(call)
+    assert exc.value.translation_key == "delete_workout_failed"
+    _activity_refresh(mock_hass).assert_not_awaited()
+
+
+def test_workout_schema_accepts_json_string():
+    data = CREATE_WORKOUT_SCHEMA({"workout": '{"workoutName": "Easy"}', "date": "2026-10-16"})
+    assert data["workout"] == {"workoutName": "Easy"}
+    assert data["date"] == date(2026, 10, 16)
+
+
+@pytest.mark.parametrize("workout", ["not json", "[1, 2]", [1, 2], 5])
+def test_workout_schema_rejects_non_objects(workout):
+    with pytest.raises(vol.Invalid):
+        CREATE_WORKOUT_SCHEMA({"workout": workout})
+
+
+@pytest.mark.parametrize("workout_id", [0, -1, "abc", 1.9, "1.9", True, None, "²", "٤٢"])
+def test_workout_ids_reject_values_int_would_change(workout_id):
+    """1.9 or True must not silently become workout 1."""
+    with pytest.raises(vol.Invalid):
+        DELETE_WORKOUT_SCHEMA({"workout_id": workout_id})
+
+
+@pytest.mark.parametrize("workout_id", [42, 42.0, "42", " 42 "])
+def test_workout_ids_accept_whole_numbers(workout_id):
+    assert DELETE_WORKOUT_SCHEMA({"workout_id": workout_id})["workout_id"] == 42
+
+
+async def test_create_workout_schedule_failure_names_created_workout(mock_hass: MagicMock):
+    """The workout exists after a failed schedule; say so and refresh anyway."""
+    async_setup_services(mock_hass)
+    handler = _get_handler(mock_hass, "create_workout")
+    client = _get_client(mock_hass)
+    client.create_workout.return_value = {"workoutId": 42}
+    client.schedule_workout.side_effect = GarminConnectError("boom")
+
+    call = MagicMock()
+    call.data = {"workout": _WORKOUT, "date": date(2026, 10, 16)}
+    with pytest.raises(HomeAssistantError) as exc:
+        await handler(call)
+    assert exc.value.translation_key == "create_workout_schedule_failed"
+    assert exc.value.translation_placeholders["workout_id"] == "42"
+    _activity_refresh(mock_hass).assert_awaited_once()
+
+
+async def test_create_workout_without_id_fails(mock_hass: MagicMock):
+    async_setup_services(mock_hass)
+    handler = _get_handler(mock_hass, "create_workout")
+    _get_client(mock_hass).create_workout.return_value = {}
+
+    call = MagicMock()
+    call.data = {"workout": _WORKOUT}
+    with pytest.raises(HomeAssistantError) as exc:
+        await handler(call)
+    assert exc.value.translation_key == "create_workout_failed"
+
+
+async def test_schedule_workout_without_id_fails(mock_hass: MagicMock):
+    """A 204/empty answer must not report success with schedule_id None."""
+    async_setup_services(mock_hass)
+    handler = _get_handler(mock_hass, "schedule_workout")
+    _get_client(mock_hass).schedule_workout.return_value = {}
+
+    call = MagicMock()
+    call.data = {"workout_id": 42, "date": date(2026, 10, 16)}
+    with pytest.raises(HomeAssistantError) as exc:
+        await handler(call)
+    assert exc.value.translation_key == "schedule_workout_failed"

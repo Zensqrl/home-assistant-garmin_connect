@@ -8,7 +8,12 @@
     "download_activity": { "service": "mdi:download" },
     "add_hydration": { "service": "mdi:cup-water" },
     "add_nutrition_log": { "service": "mdi:food-apple" },
-    "add_gear_to_activity": { "service": "mdi:plus-box" }
+    "add_gear_to_activity": { "service": "mdi:plus-box" },
+    "create_workout": { "service": "mdi:clipboard-plus-outline" },
+    "update_workout": { "service": "mdi:clipboard-edit-outline" },
+    "delete_workout": { "service": "mdi:clipboard-remove-outline" },
+    "schedule_workout": { "service": "mdi:calendar-plus" },
+    "unschedule_workout": { "service": "mdi:calendar-remove" }
   },
   "entity": {
     "sensor": {
@@ -83,6 +88,7 @@
       "last_7_days_avg_resting_heart_rate": { "default": "mdi:heart-pulse" },
       "last_activities": { "default": "mdi:numeric" },
       "last_activity": { "default": "mdi:walk" },
+      "last_activity_route": { "default": "mdi:map-marker-path" },
       "last_synced": { "default": "mdi:sync" },
       "last_workout": { "default": "mdi:dumbbell" },
       "last_workouts": { "default": "mdi:dumbbell" },
@@ -138,6 +144,7 @@
       "rest_stress_percentage": { "default": "mdi:flash-alert" },
       "resting_heart_rate": { "default": "mdi:heart-pulse" },
       "sedentary_time": { "default": "mdi:seat" },
+      "skin_temp_change": { "default": "mdi:thermometer-lines" },
       "sleep_duration": { "default": "mdi:sleep" },
       "sleep_score": { "default": "mdi:sleep" },
       "sleeping_time": { "default": "mdi:sleep" },

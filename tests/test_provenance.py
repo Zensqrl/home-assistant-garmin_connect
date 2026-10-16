@@ -1,7 +1,6 @@
 """Freshness remains attached to the value, even across empty polls."""
 
-from datetime import UTC, date, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from homeassistant.components.sensor import SensorStateClass
@@ -88,7 +87,7 @@ def test_load_statistics_and_missing_values():
     "coordinator_type, method",
     [(CoreCoordinator, "fetch_core_data"), (TrainingCoordinator, "fetch_training_data")],
 )
-async def test_ha_local_date_and_last_success(coordinator_type, method):
+async def test_library_calendar_day_and_last_success(coordinator_type, method):
     hass, entry, auth = MagicMock(), MagicMock(), MagicMock()
     entry.options = {}
     client = MagicMock()
@@ -99,17 +98,13 @@ async def test_ha_local_date_and_last_success(coordinator_type, method):
     )
     setattr(client, method, fetch)
     coordinator = coordinator_type(hass, entry, client, auth)
-    coordinator._update_tokens_if_changed = AsyncMock()
-    # UTC date is Sep 18; configured local date still Sep 17.
-    from zoneinfo import ZoneInfo
-
-    local = datetime(2026, 9, 18, 3, 30, tzinfo=UTC).astimezone(ZoneInfo("America/New_York"))
-    with patch("custom_components.garmin_connect.coordinator.dt_util.now", return_value=local):
-        data = await coordinator._async_update_data()
-        fetch.assert_awaited_once_with(target_date=date(2026, 9, 17))
-        coordinator.data = data
-        fetch.return_value = {"_sources": {"summary": {"outcome": "error", "fetched_at": "later"}}}
-        failed = await coordinator._async_update_data()
+    coordinator._update_tokens_if_changed = MagicMock()
+    # Client resolves Garmin's calendar day from its account/device timezone.
+    data = await coordinator._async_update_data()
+    fetch.assert_awaited_once_with()
+    coordinator.data = data
+    fetch.return_value = {"_sources": {"summary": {"outcome": "error", "fetched_at": "later"}}}
+    failed = await coordinator._async_update_data()
     assert failed["_sources"]["summary"]["last_successful_fetch"] == "2026-09-18T03:30:00+00:00"
     assert _source_status(failed) == "partial"
     assert _source_status({}) is None
