@@ -1,5 +1,6 @@
 """Tests for Garmin Connect integration setup and migration."""
 
+import asyncio
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,14 +10,19 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from custom_components.garmin_connect import (
     _migrate_entity_unique_ids,
     async_migrate_entry,
+    async_options_update_listener,
+    async_setup,
     async_setup_entry,
     async_unload_entry,
 )
 from custom_components.garmin_connect.const import (
     CONF_CLIENT_ID,
+    CONF_IS_CN,
     CONF_REFRESH_TOKEN,
+    CONF_SCAN_INTERVAL,
     CONF_TOKEN,
 )
+from custom_components.garmin_connect.coordinator import GarminConnectCoordinators
 
 from .conftest import ENTRY_DATA
 
@@ -69,7 +75,6 @@ async def test_setup_entry_success() -> None:
     entry.options = {}
     hass = MagicMock()
     hass.config.country = "US"
-    hass.services.has_service = MagicMock(return_value=False)
 
     coord = _coord_mock()
     with ExitStack() as stack:
@@ -78,12 +83,6 @@ async def test_setup_entry_success() -> None:
         )
         stack.enter_context(patch("custom_components.garmin_connect.GarminClient"))
         _stack_coordinators(stack, coord)
-        stack.enter_context(
-            patch(
-                "custom_components.garmin_connect.async_setup_services",
-                new=AsyncMock(),
-            )
-        )
         hass.config_entries.async_forward_entry_setups = AsyncMock()
         result = await async_setup_entry(hass, entry)
 
@@ -93,14 +92,11 @@ async def test_setup_entry_success() -> None:
 
 async def test_setup_entry_stores_all_coordinators() -> None:
     """runtime_data must be a GarminConnectCoordinators with all 9 fields."""
-    from custom_components.garmin_connect.coordinator import GarminConnectCoordinators
-
     entry = MagicMock()
     entry.data = dict(ENTRY_DATA)
     entry.options = {}
     hass = MagicMock()
     hass.config.country = "US"
-    hass.services.has_service = MagicMock(return_value=True)
 
     coord = _coord_mock()
     with ExitStack() as stack:
@@ -132,7 +128,6 @@ async def test_setup_entry_restores_di_tokens_onto_auth() -> None:
     entry.options = {}
     hass = MagicMock()
     hass.config.country = "US"
-    hass.services.has_service = MagicMock(return_value=True)
 
     captured: dict = {}
 
@@ -160,91 +155,159 @@ async def test_setup_entry_restores_di_tokens_onto_auth() -> None:
     assert auth.di_client_id == ENTRY_DATA[CONF_CLIENT_ID]
 
 
-async def test_setup_entry_registers_services_when_not_present() -> None:
-    """Services are registered when has_service returns False."""
+async def test_setup_entry_passes_ha_time_zone_to_client() -> None:
+    """The Garmin day must follow HA's zone, not the process zone."""
     entry = MagicMock()
     entry.data = dict(ENTRY_DATA)
     entry.options = {}
     hass = MagicMock()
-    hass.config.country = "US"
-    hass.services.has_service = MagicMock(return_value=False)
+    hass.config.time_zone = "Europe/Istanbul"
 
     coord = _coord_mock()
-    setup_services = AsyncMock()
+    with ExitStack() as stack:
+        stack.enter_context(patch("custom_components.garmin_connect.GarminAuth"))
+        client_cls = stack.enter_context(patch("custom_components.garmin_connect.GarminClient"))
+        _stack_coordinators(stack, coord)
+        hass.config_entries.async_forward_entry_setups = AsyncMock()
+        await async_setup_entry(hass, entry)
+
+    assert client_cls.call_args.kwargs["timezone"] == "Europe/Istanbul"
+
+
+async def test_setup_entry_records_region_for_reload_detection() -> None:
+    """The China-region flag the client was built with is kept on runtime_data."""
+    entry = MagicMock()
+    entry.data = dict(ENTRY_DATA)
+    entry.options = {CONF_IS_CN: True}
+    hass = MagicMock()
+
+    coord = _coord_mock()
     with ExitStack() as stack:
         stack.enter_context(patch("custom_components.garmin_connect.GarminAuth"))
         stack.enter_context(patch("custom_components.garmin_connect.GarminClient"))
         _stack_coordinators(stack, coord)
-        stack.enter_context(
-            patch(
-                "custom_components.garmin_connect.async_setup_services",
-                setup_services,
-            )
-        )
         hass.config_entries.async_forward_entry_setups = AsyncMock()
         await async_setup_entry(hass, entry)
 
-    setup_services.assert_awaited_once()
+    assert entry.runtime_data.is_cn is True
 
 
-async def test_setup_entry_skips_services_when_already_registered() -> None:
-    """Services are not re-registered when has_service returns True."""
+async def test_setup_entry_core_failure_propagates() -> None:
+    """A failing core refresh (ConfigEntryNotReady/AuthFailed) must surface, not be swallowed."""
+    from homeassistant.exceptions import ConfigEntryNotReady
+
     entry = MagicMock()
     entry.data = dict(ENTRY_DATA)
     entry.options = {}
     hass = MagicMock()
-    hass.config.country = "US"
-    hass.services.has_service = MagicMock(return_value=True)
 
     coord = _coord_mock()
-    setup_services = AsyncMock()
+    coord.async_config_entry_first_refresh = AsyncMock(side_effect=ConfigEntryNotReady("down"))
     with ExitStack() as stack:
         stack.enter_context(patch("custom_components.garmin_connect.GarminAuth"))
         stack.enter_context(patch("custom_components.garmin_connect.GarminClient"))
         _stack_coordinators(stack, coord)
+        with pytest.raises(ConfigEntryNotReady):
+            await async_setup_entry(hass, entry)
+
+
+async def test_optional_refresh_does_not_block_startup(
+    hass, mock_config_entry, mock_auth, mock_client
+):
+    """Setup returns while optional refreshes are still pending."""
+    started = asyncio.Event()
+    release = asyncio.Event()
+    finished = asyncio.Event()
+    optional = _coord_mock()
+    optional.data_name = "training"
+
+    async def slow_refresh():
+        """Keep optional work pending until the test releases it."""
+        started.set()
+        await release.wait()
+        finished.set()
+
+    optional.async_refresh.side_effect = slow_refresh
+    core = _coord_mock()
+    with ExitStack() as stack:
+        _stack_coordinators(stack, core)
         stack.enter_context(
-            patch(
-                "custom_components.garmin_connect.async_setup_services",
-                setup_services,
+            patch("custom_components.garmin_connect.TrainingCoordinator", return_value=optional)
+        )
+
+        async def forward_platforms(*args):
+            """Optional refreshes must start only after entity listeners exist."""
+            optional.async_refresh.assert_not_awaited()
+
+        stack.enter_context(
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new=AsyncMock(side_effect=forward_platforms),
             )
         )
-        hass.config_entries.async_forward_entry_setups = AsyncMock()
-        await async_setup_entry(hass, entry)
+        assert await asyncio.wait_for(async_setup_entry(hass, mock_config_entry), timeout=1)
+        await asyncio.wait_for(started.wait(), timeout=1)
+        # HA's startup barrier deliberately excludes entry background tasks.
+        await asyncio.wait_for(hass.async_block_till_done(), timeout=1)
+        assert not finished.is_set()
 
-    setup_services.assert_not_awaited()
+        release.set()
+        await asyncio.wait_for(finished.wait(), timeout=1)
+
+
+# ── Options listener ──────────────────────────────────────────────────────────
+
+
+def _coordinators(is_cn: bool = False) -> GarminConnectCoordinators:
+    coords = [MagicMock() for _ in range(9)]
+    return GarminConnectCoordinators(*coords, is_cn=is_cn)
+
+
+async def test_options_listener_updates_intervals() -> None:
+    """A new scan interval is pushed to every coordinator without a reload."""
+    hass = MagicMock()
+    hass.config_entries.async_reload = AsyncMock()
+    entry = MagicMock()
+    entry.options = {CONF_SCAN_INTERVAL: 120}
+    entry.runtime_data = _coordinators()
+
+    await async_options_update_listener(hass, entry)
+
+    hass.config_entries.async_reload.assert_not_awaited()
+    for coord in entry.runtime_data:
+        coord.set_update_interval.assert_called_once()
+        (interval,) = coord.set_update_interval.call_args.args
+        assert interval.total_seconds() == 120
+
+
+async def test_options_listener_reloads_when_region_changes() -> None:
+    """Switching the China region needs a new client, so the entry is reloaded."""
+    hass = MagicMock()
+    hass.config_entries.async_reload = AsyncMock()
+    entry = MagicMock()
+    entry.entry_id = "test_entry_id"
+    entry.options = {CONF_IS_CN: True}
+    entry.runtime_data = _coordinators(is_cn=False)
+
+    await async_options_update_listener(hass, entry)
+
+    hass.config_entries.async_reload.assert_awaited_once_with("test_entry_id")
+    for coord in entry.runtime_data:
+        coord.set_update_interval.assert_not_called()
 
 
 # ── Unload tests ──────────────────────────────────────────────────────────────
 
 
-async def test_unload_entry_unregisters_services_when_last_entry() -> None:
-    """Services are removed when the last config entry is unloaded."""
+async def test_unload_entry_unloads_platforms() -> None:
+    """Unloading only tears down platforms; services stay registered for other entries."""
     entry = MagicMock()
     hass = MagicMock()
-    hass.config_entries.async_entries = MagicMock(return_value=[entry])
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
 
-    unload_services = AsyncMock()
-    with patch("custom_components.garmin_connect.async_unload_services", unload_services):
-        result = await async_unload_entry(hass, entry)
-
-    assert result is True
-    unload_services.assert_awaited_once()
-
-
-async def test_unload_entry_keeps_services_when_other_entries_exist() -> None:
-    """Services are NOT removed when other config entries remain loaded."""
-    entry1, entry2 = MagicMock(), MagicMock()
-    hass = MagicMock()
-    hass.config_entries.async_entries = MagicMock(return_value=[entry1, entry2])
-    hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
-
-    unload_services = AsyncMock()
-    with patch("custom_components.garmin_connect.async_unload_services", unload_services):
-        result = await async_unload_entry(hass, entry1)
-
-    assert result is True
-    unload_services.assert_not_awaited()
+    assert await async_unload_entry(hass, entry) is True
+    hass.services.async_remove.assert_not_called()
 
 
 # ── Migration tests ───────────────────────────────────────────────────────────
@@ -410,3 +473,29 @@ async def test_migrate_entity_non_matching_prefix_skipped() -> None:
         _migrate_entity_unique_ids(mock_hass, mock_entry, "user@example.com")
 
     mock_registry.async_update_entity.assert_not_called()
+
+
+async def test_async_setup_serves_and_registers_route_card() -> None:
+    """The card folder is served once and the card auto-loaded, version-busted."""
+    hass = MagicMock()
+    hass.http.async_register_static_paths = AsyncMock()
+    integration = MagicMock()
+    integration.version = "9.9.9"
+
+    with (
+        patch(
+            "custom_components.garmin_connect.async_get_integration",
+            AsyncMock(return_value=integration),
+        ),
+        patch("custom_components.garmin_connect.add_extra_js_url") as add_js,
+        patch("custom_components.garmin_connect.async_setup_services") as setup_services,
+    ):
+        assert await async_setup(hass, {}) is True
+
+    setup_services.assert_called_once_with(hass)
+
+    (configs,) = hass.http.async_register_static_paths.await_args.args
+    assert len(configs) == 1
+    assert configs[0].url_path == "/garmin_connect"
+    assert configs[0].path.endswith("custom_components/garmin_connect/www")
+    add_js.assert_called_once_with(hass, "/garmin_connect/garmin-polyline-card.js?v=9.9.9")

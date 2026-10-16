@@ -279,6 +279,7 @@ Things to know:
 | Highest / Lowest / Latest Respiration | Breathing rate (brpm) |
 | Latest Respiration Time | When respiration was last measured |
 | Average Sleep Respiration | Breathing rate averaged over the sleep window (brpm) |
+| Skin Temperature Change | Nightly skin temperature change from your baseline (devices with a skin temperature sensor); attribute `calibration_days` |
 | Average Altitude | Average monitoring altitude |
 
 ### Fitness & Training
@@ -327,7 +328,7 @@ Things to know:
 | Last Workout / Workouts | Scheduled/planned training sessions |
 | Today's Scheduled Workout | Today's training-calendar session, e.g. from a Garmin Coach plan |
 | Next Scheduled Workout | The next upcoming training-calendar session (today or later) |
-| Training Plan Goal Event | Active plan's goal race: name, target distance, target date, projected/predicted time |
+| Training Plan Goal Event | Goal race from the active plan, or the primary/next race on your calendar: name, target distance, date, `days_until_event` countdown, projected/predicted time |
 | Last Synced | Last device sync timestamp |
 
 Scheduled workouts and the training plan's goal event (target race) are also exposed as a `calendar.garmin_connect_scheduled_workouts` calendar entity — usable with HA's built-in Calendar dashboard card, `calendar.get_events`, and `trigger: calendar` automations.
@@ -408,14 +409,9 @@ The `Last Activity Route` sensor (`sensor.garmin_connect_last_activity_route`) c
 
 **Installation:**
 
-1. Copy all three files from the `www/` folder to your `<config>/www/` folder:
-   - `garmin-polyline-card.js`
-   - `leaflet.js`
-   - `leaflet.css`
-2. Add the card as a resource: **Settings → Dashboards → ⋮ → Resources → Add Resource**
-   - URL: `/local/garmin-polyline-card.js`
-   - Type: JavaScript Module
-3. Hard refresh your browser (Ctrl+Shift+R)
+Nothing to install. The integration serves the card (and Leaflet, which it uses to draw the map) itself and loads it in the frontend automatically. After installing or updating, hard refresh your browser (Ctrl+Shift+R).
+
+> **Upgrading from a manual install?** Earlier versions required copying the card to `<config>/www/` and adding it as a dashboard resource. You can remove that resource (**Settings → Dashboards → ⋮ → Resources**, URL `/local/garmin-polyline-card.js`) and delete `garmin-polyline-card.js`, `leaflet.js` and `leaflet.css` from `<config>/www/`. Leaving them in place does no harm.
 
 **Usage:**
 
@@ -565,7 +561,7 @@ Upload an activity file (FIT, GPX, TCX) to Garmin Connect.
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `entity_id` | No | Garmin Connect entity whose account should receive the upload |
-| `file_path` | Yes | Absolute path or relative to HA config directory |
+| `file_path` | Yes | `.fit`, `.gpx` or `.tcx` file, absolute or relative to the HA config directory. Paths outside the config directory must be in `allowlist_external_dirs` |
 
 ```yaml
 action: garmin_connect.upload_activity
@@ -635,6 +631,41 @@ action: garmin_connect.add_gear_to_activity
 data:
   activity_id: 12345678901
   entity_id: sensor.garmin_connect_my_running_shoes
+```
+
+### Workouts
+
+Create, change and schedule structured workouts so they show up on your watch. The actions take Garmin's own workout JSON (the same format as [python-garminconnect](https://github.com/cyberjunky/python-garminconnect)), as an object or a JSON string from a template. Workout IDs are in the `last_workouts` attributes of the Last workouts sensor; schedule IDs are the `id` of the entries in the `upcoming` attribute of the Next scheduled workout sensor.
+
+| Action | Parameters | Response |
+|--------|------------|----------|
+| `garmin_connect.create_workout` | `workout`, optional `date` to schedule it right away | `workout_id`, plus `schedule_id` and `date` when scheduled |
+| `garmin_connect.update_workout` | `workout_id`, `workout` (complete JSON; keeps ID and schedules) | – |
+| `garmin_connect.delete_workout` | `workout_id` (also removes its calendar entries) | – |
+| `garmin_connect.schedule_workout` | `workout_id`, `date` | `schedule_id`, `workout_id`, `date` |
+| `garmin_connect.unschedule_workout` | `schedule_id` (keeps the workout) | – |
+
+All take an optional `entity_id` to pick the account.
+
+```yaml
+action: garmin_connect.create_workout
+data:
+  date: "{{ (now() + timedelta(days=1)).date() }}"
+  workout:
+    workoutName: "Easy 30 min"
+    sportType: { sportTypeId: 1, sportTypeKey: running }
+    workoutSegments:
+      - segmentOrder: 1
+        sportType: { sportTypeId: 1, sportTypeKey: running }
+        workoutSteps:
+          - type: ExecutableStepDTO
+            stepOrder: 1
+            stepType: { stepTypeId: 3, stepTypeKey: interval }
+            endCondition: { conditionTypeId: 2, conditionTypeKey: time }
+            endConditionValue: 1800
+            targetType: { workoutTargetTypeId: 4, workoutTargetTypeKey: heart.rate.zone }
+            zoneNumber: 2
+response_variable: created
 ```
 
 ## Automation Examples
