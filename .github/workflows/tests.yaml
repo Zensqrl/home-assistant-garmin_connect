@@ -23,6 +23,11 @@ jobs:
         with:
           python-version: "3.14"
       - run: pip install -r requirements.txt -r requirements_lint.txt
+      # Validate this paired sync against its immutable library candidate.
+      # Production requirements remain pinned to the last published wheel.
+      - name: Install paired library candidate
+        if: github.event_name == 'pull_request' && github.head_ref == 'sync/upstream-20261016'
+        run: pip install --no-deps 'git+https://github.com/Zensqrl/ha-garmin.git@462ed70377f55b90c6a9029f0d8230ca5d6bf56d'
       - run: pre-commit run --all-files --hook-stage manual --config .github/pre-commit-config.yaml
 
   tests:
@@ -35,4 +40,7 @@ jobs:
         with:
           python-version: "3.14"
       - run: pip install -r requirements.txt -r requirements_lint.txt
+      - name: Install paired library candidate
+        if: github.event_name == 'pull_request' && github.head_ref == 'sync/upstream-20261016'
+        run: pip install --no-deps 'git+https://github.com/Zensqrl/ha-garmin.git@462ed70377f55b90c6a9029f0d8230ca5d6bf56d'
       - run: pytest tests/ -q
