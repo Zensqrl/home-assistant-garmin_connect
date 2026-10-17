@@ -4,7 +4,7 @@ import datetime
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 
 from custom_components.garmin_connect.sensor import (
     _COORDINATOR_SENSOR_MAP,
@@ -63,6 +63,19 @@ def test_all_sensor_descriptions_have_translation_keys() -> None:
     for desc in _all_descriptions():
         assert desc.translation_key or desc.name, (
             f"Sensor {desc.key} missing both translation_key and name"
+        )
+
+
+def test_no_sensor_uses_total_without_last_reset():
+    """No sensor may use TOTAL, since none of them sets last_reset.
+
+    Without last_reset, Home Assistant subtracts each daily reset from the
+    long-term sum, so daily statistics of Garmin's daily counters go negative.
+    """
+    for desc in _all_descriptions():
+        assert desc.state_class != SensorStateClass.TOTAL, (
+            f"{desc.key} uses TOTAL without last_reset; use TOTAL_INCREASING for "
+            "daily counters or MEASUREMENT for values that do not accumulate"
         )
 
 
@@ -442,6 +455,71 @@ def test_training_plan_goal_event_countdown_tolerates_bad_date() -> None:
     assert sensor.extra_state_attributes["days_until_event"] is None
     coord.data = {"trainingPlanGoalEvent": {}}
     assert sensor.extra_state_attributes == {}
+
+
+def test_upcoming_events_count_and_countdowns() -> None:
+    """upcomingEvents sensor: state = event count, each event gets a countdown."""
+    desc = next(d for d in ACTIVITY_TRACKING_SENSORS if d.key == "upcomingEvents")
+    coord = MagicMock()
+    coord.data = mock_activity_data()
+    sensor = GarminConnectSensor(coord, desc, "entry_id")
+    assert sensor.native_value == 2
+    with patch("custom_components.garmin_connect.sensor.dt_util.now") as mock_now:
+        mock_now.return_value.date.return_value = datetime.date(2026, 11, 1)
+        events = sensor.extra_state_attributes["events"]
+    assert [e["eventName"] for e in events] == ["5K Plan", "City Marathon"]
+    assert events[0]["days_until_event"] == 20
+
+
+def test_upcoming_events_zero_without_data() -> None:
+    desc = next(d for d in ACTIVITY_TRACKING_SENSORS if d.key == "upcomingEvents")
+    coord = MagicMock()
+    coord.data = {"upcomingEvents": None}
+    sensor = GarminConnectSensor(coord, desc, "entry_id")
+    assert sensor.native_value == 0
+    assert sensor.extra_state_attributes == {"events": []}
+
+
+def test_training_vo2_cycling_and_acclimation() -> None:
+    """Cycling VO2 max and heat/altitude acclimation come from fetch_training_data."""
+    coord = MagicMock()
+    coord.data = mock_training_data()
+
+    def sensor(key: str) -> GarminConnectSensor:
+        desc = next(d for d in TRAINING_SENSORS if d.key == key)
+        return GarminConnectSensor(coord, desc, "entry_id")
+
+    assert sensor("vo2MaxCycling").native_value == 41.0
+    heat = sensor("heatAcclimation")
+    assert heat.native_value == 35
+    assert heat.extra_state_attributes == {"trend": "ACCLIMATIZING"}
+    altitude = sensor("altitudeAcclimation")
+    assert altitude.native_value == 1200
+    assert altitude.extra_state_attributes == {"trend": None, "current_altitude": 1500}
+
+
+def test_lifetime_totals_sensors() -> None:
+    coord = MagicMock()
+    coord.data = mock_goals_data()
+    values = {
+        key: GarminConnectSensor(
+            coord, next(d for d in GOALS_SENSORS if d.key == key), "entry_id"
+        ).native_value
+        for key in ("lifetimeSteps", "lifetimeDistance", "lifetimeCalories", "lifetimeActiveDays")
+    }
+    assert values == {
+        "lifetimeSteps": 10428222,
+        "lifetimeDistance": 8123456.0,
+        "lifetimeCalories": 4567890,
+        "lifetimeActiveDays": 2350,
+    }
+
+
+def test_lifetime_totals_missing_is_none() -> None:
+    desc = next(d for d in GOALS_SENSORS if d.key == "lifetimeSteps")
+    coord = MagicMock()
+    coord.data = {"lifetimeTotals": {}}
+    assert GarminConnectSensor(coord, desc, "entry_id").native_value is None
 
 
 def test_bp_systolic_value_and_attributes() -> None:
@@ -921,6 +999,9 @@ def test_gear_sensor_attributes() -> None:
     assert attrs["total_activities"] == 50
     assert attrs["gear_make_name"] == "Nike"
     assert attrs["default_for_activity"] == ["running"]
+    assert attrs["total_duration_seconds"] == 180000
+    assert attrs["days_used"] == 45
+    assert attrs["notes"] == "Race shoes"
 
 
 def test_gear_sensor_name_property() -> None:
