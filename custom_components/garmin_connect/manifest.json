@@ -20,5 +20,5 @@
   "requirements": [
     "ha-garmin@https://github.com/Zensqrl/ha-garmin/releases/download/v0.1.52+zs1/ha_garmin-0.1.52+zs1-py3-none-any.whl"
   ],
-  "version": "3.0.19.0"
+  "version": "3.0.20.0"
 }

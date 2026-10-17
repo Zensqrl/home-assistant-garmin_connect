@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
-import probatio as vol
 from aiohttp import ClientError
 from ha_garmin import GarminConnectError
 from homeassistant.core import (
@@ -24,6 +23,11 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
+
+try:
+    import probatio as vol
+except ImportError:  # Home Assistant < 2026.10 ships voluptuous instead
+    import voluptuous as vol  # type: ignore[no-redef]
 
 if TYPE_CHECKING:
     from ha_garmin import GarminClient
@@ -121,9 +125,9 @@ ADD_BODY_COMPOSITION_SCHEMA = vol.Schema(
 ADD_BLOOD_PRESSURE_SCHEMA = vol.Schema(
     {
         vol.Optional("entity_id"): cv.entity_id,
-        vol.Required("systolic"): vol.All(vol.Coerce(int), vol.Range(min=60, max=250)),
+        vol.Required("systolic"): vol.All(vol.Coerce(int), vol.Range(min=70, max=260)),
         vol.Required("diastolic"): vol.All(vol.Coerce(int), vol.Range(min=40, max=150)),
-        vol.Optional("pulse"): vol.All(vol.Coerce(int), vol.Range(min=30, max=220)),
+        vol.Optional("pulse"): vol.All(vol.Coerce(int), vol.Range(min=20, max=250)),
         vol.Optional("timestamp"): cv.datetime,
         vol.Optional("notes"): cv.string,
     }
