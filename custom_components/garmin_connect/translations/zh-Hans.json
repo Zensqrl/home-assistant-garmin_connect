@@ -70,12 +70,10 @@
     "step": {
       "init": {
         "data": {
-          "scan_interval": "更新间隔(秒)",
-          "is_cn": "使用 Garmin Connect 中国版 (cn.garmin.com)"
+          "scan_interval": "更新间隔(秒)"
         },
         "data_description": {
-          "scan_interval": "从 Garmin Connect 获取数据的频率(60–3600 秒)",
-          "is_cn": "为在中国 Garmin Connect 平台注册的账户启用"
+          "scan_interval": "从 Garmin Connect 获取数据的频率(60–3600 秒)"
         },
         "description": "配置您的 Garmin Connect 集成。",
         "title": "Garmin Connect 选项"
@@ -119,6 +117,8 @@
       "devices": { "name": "设备" },
       "endurance_score": { "name": "耐力得分" },
       "fitness_age": { "name": "健身年龄" },
+      "vigorous_days_avg": { "name": "每周高强度天数" },
+      "vigorous_minutes_avg": { "name": "每周高强度分钟数" },
       "floors_ascended": { "name": "上升楼层" },
       "floors_ascended_distance": { "name": "上升楼层距离" },
       "floors_ascended_goal": { "name": "上升楼层目标" },
@@ -149,6 +149,11 @@
       "last_activity": { "name": "最近活动" },
       "last_activity_route": { "name": "最近活动路线" },
       "skin_temp_change": { "name": "皮肤温度变化" },
+      "avg_sleep_stress": { "name": "睡眠平均压力" },
+      "sleep_awakenings": { "name": "睡眠醒来次数" },
+      "sleep_restless_moments": { "name": "睡眠不安次数" },
+      "avg_sleep_heart_rate": { "name": "睡眠平均心率" },
+      "sleep_body_battery_change": { "name": "睡眠身体电量变化" },
       "last_synced": { "name": "最近同步" },
       "last_workout": { "name": "最近训练" },
       "last_workouts": { "name": "最近训练" },
@@ -190,6 +195,7 @@
       "rest_stress_duration": { "name": "休息时压力时长" },
       "rest_stress_percentage": { "name": "休息时压力百分比" },
       "resting_heart_rate": { "name": "静息心率" },
+      "latest_heart_rate": { "name": "最新心率" },
       "sedentary_time": { "name": "久坐时间" },
       "sleep_need": { "name": "所需睡眠" },
       "bedtime": { "name": "就寝时间" },
@@ -204,7 +210,7 @@
       "stress_qualifier": { "name": "压力级别" },
       "total_calories": { "name": "总卡路里" },
       "total_distance": { "name": "总距离" },
-      "total_intensity_minutes": { "name": "高强度运动时间" },
+      "total_intensity_minutes": { "name": "强度分钟数" },
       "total_sleep_duration": { "name": "总睡眠时长" },
       "total_steps": { "name": "总步数" },
       "total_stress_duration": { "name": "压力总时长" },
@@ -256,7 +262,19 @@
       "wellness_end_time": { "name": "健康监测结束时间" },
       "wellness_start_time": { "name": "健康监测开始时间" },
       "yesterday_distance": { "name": "昨日距离" },
-      "yesterday_steps": { "name": "昨日步数" }
+      "yesterday_steps": { "name": "昨日步数" },
+      "yesterday_active_calories": { "name": "昨日活动卡路里" },
+      "yesterday_avg_stress_level": { "name": "昨日平均压力等级" },
+      "yesterday_max_stress_level": { "name": "昨日最高压力等级" },
+      "yesterday_stress_duration": { "name": "昨日压力时长" },
+      "yesterday_high_stress_duration": { "name": "昨日高度压力时长" },
+      "yesterday_rest_stress_duration": { "name": "昨日休息时压力时长" },
+      "yesterday_body_battery_highest": { "name": "昨日身体电量最高值" },
+      "yesterday_body_battery_lowest": { "name": "昨日身体电量最低值" },
+      "yesterday_body_battery_charged": { "name": "昨日身体电量充电" },
+      "yesterday_body_battery_drained": { "name": "昨日身体电量耗电" },
+      "yesterday_resting_heart_rate": { "name": "昨日静息心率" },
+      "yesterday_intensity_minutes": { "name": "昨日强度分钟数" }
     }
   },
   "services": {
@@ -346,6 +364,14 @@
         "gear_uuid": { "name": "装备 UUID", "description": "要添加的装备的 UUID。" },
         "entity_id": { "name": "装备传感器实体", "description": "gear_uuid 的替代项 — 选择一个装备传感器实体。" }
       }
+    },
+    "get_day_summary": {
+      "name": "获取每日摘要",
+      "description": "从 Garmin Connect 获取任意日期的每日摘要（步数、压力、身体电量、静息心率、强度分钟数）并返回。",
+      "fields": {
+        "date": { "name": "日期", "description": "要获取的日期。" },
+        "entity_id": { "name": "Garmin Connect 实体", "description": "可选，指定要读取其账户的 Garmin Connect 实体。" }
+      }
     }
   },
   "exceptions": {
@@ -366,6 +392,17 @@
     "set_active_gear_failed": { "message": "设置默认装备失败:{error}" },
     "unsupported_file_format": { "message": "不支持的活动文件 {file_path}。支持的格式:{formats}" },
     "upload_activity_failed": { "message": "上传活动失败:{error}" },
-    "add_nutrition_failed": { "message": "记录营养失败:{error}" }
+    "add_nutrition_failed": { "message": "记录营养失败:{error}" },
+    "get_day_summary_failed": { "message": "获取每日摘要失败：{error}" }
+  },
+  "issues": {
+    "connect_plus_required": {
+      "title": "营养数据需要 Garmin Connect+",
+      "description": "{title} 的营养传感器不可用，因为你的 Garmin 账户没有有效的 Connect+ 订阅。请在 Garmin Connect 应用中订阅 Connect+ 以启用营养记录，或禁用此集成的营养传感器。"
+    },
+    "lifetime_totals_hidden": {
+      "title": "Garmin 隐藏了你的累计数据",
+      "description": "Garmin Connect 拒绝提供 {title} 的累计数据，因此累计步数、距离、卡路里和活跃天数传感器不可用。只有在你的个人资料中显示累计数据时，Garmin 才会提供：在网页版 Garmin Connect 中打开“账户设置 → 公开个人资料”，在“在个人资料中显示”下启用累计数据。个人资料可以保持“仅自己可见”，不会公开任何内容。传感器将在下次刷新时更新。如果你不需要这些传感器，请将其禁用。"
+    }
   }
 }

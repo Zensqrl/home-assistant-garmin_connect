@@ -95,7 +95,7 @@ Alternatively:
 1. Navigate to **Settings** → **Devices & Services**
 2. Click **+ Add Integration**
 3. Search for **"Garmin Connect"**
-4. Enter your Garmin Connect email and password
+4. Enter your Garmin Connect email and password (tick **Use Garmin Connect China** for .cn accounts)
 5. If MFA is enabled, enter the verification code when prompted
 
 ### Options
@@ -122,6 +122,8 @@ The integration uses cloud polling to fetch data from Garmin Connect servers. Da
 | Menstrual | Cycle phase, day, fertile window |
 | Nutrition | Consumed calories & macros, goals, per-meal breakdown (Connect+, disabled by default) |
 
+> **Yesterday's totals:** every poll asks Garmin for *today*. If the watch only uploads after midnight, the last hours of the previous day never reach the daily sensors. The `Yesterday …` stress, Body Battery, resting heart rate, intensity minutes and active calories sensors fix that. They are **disabled by default**: enable the ones you want under **Settings → Devices & services → Garmin Connect → Entities**. While at least one is enabled, the previous day's summary is read again when the date rolls over and when a new watch sync lands (one extra API call each time); with none enabled, nothing extra is fetched. Use them for end-of-day reports, or `garmin_connect.get_day_summary` for any other date.
+
 > **Tip:** Garmin devices sync to Garmin Connect when in Bluetooth range of the paired phone or via WiFi. Sensors update after your device syncs to Garmin Connect **and** the integration polls for new data.
 
 ## Sensors
@@ -138,6 +140,7 @@ All sensors are created under a single "Garmin Connect" device. Entity IDs follo
 | Daily Step Goal | Your configured step target |
 | Distance | Distance walked/run in meters |
 | Yesterday Steps / Distance | Previous day's complete totals |
+| Yesterday Active Calories | Previous day's final active calories |
 | Weekly Step / Distance Avg | 7-day averages |
 | Floors Ascended / Descended | Floors climbed and descended |
 | Floors Ascended Distance | Vertical distance climbed in meters |
@@ -158,6 +161,9 @@ All sensors are created under a single "Garmin Connect" device. Entity IDs follo
 | Resting Heart Rate | Daily resting HR |
 | Min / Max Heart Rate | Daily HR range |
 | 7-Day Average Resting Heart Rate | Weekly resting HR average |
+| Latest Heart Rate | Newest heart rate sample Garmin has, with its `measurement_time`; disabled by default (see below) |
+
+> **Latest heart rate** is not live: Garmin only receives heart rate samples (about every 2 minutes) when your watch syncs, so this is the last sample from the last sync. It's disabled by default because it costs a request; while enabled, that request is made once per new watch sync, not on every poll. Its age in minutes, for a template or automation (empty while there's no sample): `{% set t = state_attr('sensor.garmin_connect_latest_heart_rate', 'measurement_time') %}{{ ((now() - t).total_seconds() / 60) | round(0) if t else none }}`
 | Min / Max Average Heart Rate | Average min/max HR |
 | Abnormal Heart Rate Alerts | Count of abnormal HR alerts |
 
@@ -180,12 +186,21 @@ All sensors are created under a single "Garmin Connect" device. Entity IDs follo
 | Total Stress Duration | Total time in stress |
 | Rest / Activity / Low / Medium / High Stress Duration | Duration breakdowns |
 | Stress Percentage | Percentage breakdowns by category |
+| Yesterday Average / Max Stress | Previous day's final stress (attribute `date`) |
+| Yesterday Stress / High Stress / Rest Duration | Previous day's final durations in minutes |
+| Yesterday Resting Heart Rate | Previous day's resting heart rate |
+| Yesterday Intensity Minutes | Previous day's moderate + 2× vigorous (attributes `moderate`, `vigorous`) |
 
 ### Sleep
 
 | Sensor | Description |
 |--------|-------------|
-| Sleep Score | Overall sleep quality score |
+| Sleep Score | Overall sleep quality score; attributes carry the qualifier and the per-component qualifiers (duration, stress, awakenings, restlessness, REM/light/deep) plus Garmin's feedback keys |
+| Average Sleep Stress | Stress level averaged over the sleep window; attributes `qualifier`, `optimal_start`, `optimal_end`, and `sleep_stress` (the overnight samples as `[{time, value}]`, not stored in history) |
+| Sleep Awakenings | Number of times you woke up during the night |
+| Sleep Restless Moments | Number of restless moments during the night |
+| Average Sleep Heart Rate | Heart rate averaged over the sleep window (bpm) |
+| Sleep Body Battery Change | Body battery gained (or lost) overnight |
 | Sleep Need | Target sleep need in minutes |
 | Sleep Duration | Total time asleep |
 | Total Sleep Duration | Total sleep window duration |
@@ -196,6 +211,27 @@ All sensors are created under a single "Garmin Connect" device. Entity IDs follo
 | Nap Time | Daytime nap duration |
 | Unmeasurable Sleep | Unclassified sleep time |
 
+To draw last night's stress curve, for example with [apexcharts-card](https://github.com/RomRider/apexcharts-card):
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Sleep stress
+graph_span: 16h
+span:
+  end: day
+  offset: -12h
+series:
+  - entity: sensor.garmin_connect_average_sleep_stress
+    name: Stress
+    type: area
+    data_generator: |
+      return (entity.attributes.sleep_stress || []).map(
+        (p) => [new Date(p.time).getTime(), p.value]
+      );
+```
+
 ### Body Battery
 
 | Sensor | Description |
@@ -204,6 +240,7 @@ All sensors are created under a single "Garmin Connect" device. Entity IDs follo
 | Charged / Drained | Energy gained and spent |
 | Highest / Lowest | Daily peak and low |
 | Body Battery and Stress Timeline | Today's intraday Body Battery and stress curves (see below) |
+| Yesterday Highest / Lowest / Charged / Drained | Previous day's final Body Battery |
 
 #### Body Battery and Stress Timeline
 
@@ -244,7 +281,7 @@ Things to know:
 
 | Sensor | Description |
 |--------|-------------|
-| Weight | Body weight in kg |
+| Weight | Body weight in kg, attribute `measurement_time` (timestamp of the weigh-in) |
 | BMI | Body Mass Index |
 | Body Fat / Body Water | Percentage measurements |
 | Muscle Mass / Bone Mass | Mass measurements in kg |
@@ -287,6 +324,7 @@ Things to know:
 | Sensor | Description |
 |--------|-------------|
 | Fitness Age / Achievable / Previous Fitness Age | Estimated fitness ages |
+| Vigorous Days / Vigorous Minutes per Week | The two activity factors of Fitness Age: weekly averages over the last weeks (`weeks_averaged`), with Garmin's `target` and the `potential_fitness_age` reaching it would give |
 | Chronological Age | Your actual age |
 | Endurance Score | Overall endurance rating |
 | Hill Score | Hill running/climbing score |
@@ -301,12 +339,14 @@ Things to know:
 | Lactate Threshold Speed | Lactate threshold pace (m/s) |
 | Power to Weight [Sport] | Dynamic per-sport power-to-weight sensor (W/kg), e.g. Running, Cycling |
 | FTP [Sport] | Dynamic per-sport functional threshold power sensor (W), e.g. Running, Cycling |
-| Next Alarm | Next scheduled alarm time |
+| Next Alarm | Next scheduled alarm time, from the alarms Garmin syncs to its cloud (see below) |
 | Solar Intensity | Solar charging utilization (%) at the moment of the last sync, for solar-capable devices |
 | Average Solar Intensity | Solar charging utilization (%) averaged over today's readings so far |
 | Solar Time Gained | Extra battery time gained from solar today (minutes), resets daily |
 | Devices | Number of registered Garmin devices, with per-device details and last used device as attributes |
 | Connected Sensors | Number of paired ANT+/BLE sensors (power meters, HR straps, etc.), with per-sensor id and battery status as attributes |
+
+> **Next alarm** only sees the alarms Garmin makes available through its API. For some devices that is not all of them: for the CIRQA, only the first two alarms in the Garmin Connect app's list (sorted by time of day) come through, so a later alarm can be missing ([#628](https://github.com/cyberjunky/home-assistant-garmin_connect/issues/628)). The integration can't read alarms Garmin doesn't provide.
 
 > Power-to-weight and FTP sensors are created dynamically for each available sport in your Garmin training data. Names are formatted like `Power to Weight Running` and `FTP Running`.
 
@@ -319,7 +359,9 @@ Things to know:
 | Goals History | Last 10 completed goals with status |
 | Badges | Total badges earned |
 | User Points / User Level | Gamification metrics |
-| Lifetime Steps / Distance / Calories / Active Days | Lifetime totals from your Garmin Connect profile (refreshed at most hourly) |
+| Lifetime Steps / Distance / Calories / Active Days | Lifetime totals from your Garmin Connect profile (refreshed at most hourly); enabled by default in this fork, see below |
+
+> **Lifetime totals** remain enabled by default in this fork. Existing entity settings are unchanged; disable any lifetime sensors you do not want. Garmin only provides lifetime totals when they are shown in your Garmin Connect profile: on the web, open **Account Settings → Public Profile** and under **Show in profile** enable **Lifetime Totals**. Your profile can stay visible to **Only me**, so nothing becomes public. Until then the lifetime sensors are unavailable and a Repairs issue explains the setting; it clears itself once the totals come through, on the next update. With all lifetime sensors disabled, lifetime totals aren't fetched at all.
 
 > Goal sensors include detailed attributes: `goalType`, `targetValue`, `currentValue`, `progressPercent`, `startDate`, `endDate`, and `activityType`.
 
@@ -330,13 +372,32 @@ Things to know:
 | Last Activity | Most recent activity with details |
 | Last Activities | Recent activities list (attributes) |
 | Last Workout / Workouts | Scheduled/planned training sessions |
-| Today's Scheduled Workout | Today's training-calendar session, e.g. from a Garmin Coach plan |
-| Next Scheduled Workout | The next upcoming training-calendar session (today or later) |
+| Today's Scheduled Workout | Today's training-calendar session, e.g. from a Garmin Coach plan, with its steps and targets (see below) |
+| Next Scheduled Workout | The next upcoming training-calendar session (today or later), with its steps and targets (see below) |
 | Training Plan Goal Event | Goal race from the active plan, or the primary/next race on your calendar: name, target distance, date, `days_until_event` countdown, projected/predicted time |
 | Upcoming Events | Number of upcoming races/events (up to a year ahead), each in the `events` attribute with the same fields as the goal event |
 | Last Synced | Last device sync timestamp |
 
-Scheduled workouts, the training plan's goal event (target race) and your other upcoming races and events (up to a year ahead) are also exposed as a `calendar.garmin_connect_scheduled_workouts` calendar entity — usable with HA's built-in Calendar dashboard card, `calendar.get_events`, and `trigger: calendar` automations.
+#### Workout steps and targets
+
+For a workout from your workout library (created in Garmin Connect, or synced from a service such as Final Surge or TrainingPeaks), the Today's and Next Scheduled Workout sensors include its structure:
+
+- `workoutSteps`: one entry per step: `stepType` (`warmup`, `interval`, `recovery`, `cooldown`, ...), how it ends (`endCondition` + `endConditionValue`: meters for distance, seconds for time), and its target (`targetType` + `targetValueOne`/`targetValueTwo`, or `zoneNumber`). Repeats are `{"stepType": "repeat", "numberOfIterations": n, "steps": [...]}`. Targets are in Garmin's units: bpm, watts, m/s for pace and speed.
+- `steps_summary`: one readable line per step, e.g. `Interval 4.83 km @ 141–159 bpm` or `4× (Interval 400 m @ 4:00–4:30 /km; Recovery 1:30 @ HR zone 2)`. Distances and paces are metric.
+- `estimatedDistanceInMeters`, `estimatedDurationInSecs`, `workoutProvider`
+
+Garmin Coach / adaptive-plan sessions have no library workout, so they come without steps.
+
+Example notification with today's workout:
+
+```yaml
+action: notify.mobile_app_phone
+data:
+  title: "{{ states('sensor.garmin_connect_today_s_scheduled_workout') }}"
+  message: "{{ (state_attr('sensor.garmin_connect_today_s_scheduled_workout', 'steps_summary') or []) | join('\n') }}"
+```
+
+Scheduled workouts, the training plan's goal event (target race) and your other upcoming races and events (up to a year ahead) are also exposed as a `calendar.garmin_connect_scheduled_workouts` calendar entity — usable with HA's built-in Calendar dashboard card, `calendar.get_events`, and `trigger: calendar` automations. Today's and the next workout list their steps as the event description.
 
 > **Note on adaptive/Coach plans:** don't expect a full plan's worth of sessions here. Garmin only assigns the *next* workout once it sees how the current one goes, so there's typically exactly one scheduled workout at a time, plus the plan's goal event far out on the calendar — with nothing in between. Confirmed directly against Garmin Connect's own calendar UI, not just this integration's access to it: the gap is real on Garmin's side.
 
@@ -594,6 +655,24 @@ data:
 response_variable: download
 ```
 
+### garmin_connect.get_day_summary
+
+Return the daily summary for any date (response only). Useful to backfill a day that was missed, or to read a past day in a script.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `entity_id` | No | Garmin Connect entity whose account to read |
+| `date` | Yes | Date to read, e.g. `2026-10-16` |
+
+The response has `date`, `summary` (the same fields as the `Yesterday …` sensors, plus `totalSteps` and `totalDistanceMeters`) and `raw` (Garmin's full daily summary).
+
+```yaml
+action: garmin_connect.get_day_summary
+data:
+  date: "2026-10-16"
+response_variable: day
+```
+
 ### garmin_connect.add_nutrition_log
 
 Log a Quick Add nutrition entry to Garmin Connect. Requires a Connect+ subscription and initial nutrition setup in the Garmin Connect app.
@@ -794,6 +873,15 @@ If you find this integration useful, please consider supporting its development:
 - Star this repository
 - [Report issues](https://github.com/cyberjunky/home-assistant-garmin_connect/issues)
 - Share with other Home Assistant users
+
+## Community
+
+Questions, ideas or just want to chat? Join The Junkyard on Discord:
+
+<a href="https://discord.gg/hUBQxRhJCU">
+  <img src="https://raw.githubusercontent.com/cyberjunky/cyberjunky/main/assets/junkyard-discord.svg"
+       alt="Join The Junkyard on Discord" width="600">
+</a>
 
 ## License
 

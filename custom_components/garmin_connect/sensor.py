@@ -37,11 +37,15 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .coordinator import (
+    LATEST_HEART_RATE_CONTEXT,
+    LIFETIME_CONTEXT,
+    YESTERDAY_CONTEXT,
     BaseGarminCoordinator,
     GarminConnectConfigEntry,
     GearCoordinator,
     TrainingCoordinator,
 )
+from .workout import steps_summary
 
 # Limit parallel updates to prevent API rate limiting
 PARALLEL_UPDATES = 1
@@ -76,6 +80,12 @@ class GarminConnectSensorEntityDescription(SensorEntityDescription):
 
     preserve_value: bool = False
     """Retain last known value when API returns None (weight, sleep at midnight, etc)."""
+
+    coordinator_context: str | None = None
+    """Coordinator context; lets the coordinator skip data no enabled sensor uses."""
+
+    available_fn: Callable[[dict[str, Any]], bool] | None = None
+    """Return False when the coordinator data can't provide this sensor."""
 
 
 # Only mapped metrics have verified endpoint provenance. Unmapped entities retain
@@ -118,6 +128,11 @@ _P0_SOURCES = {
             "optimalBedtime",
             "optimalWakeTime",
             "avgSleepRespirationValue",
+            "avgSleepStress",
+            "awakeCount",
+            "restlessMomentsCount",
+            "avgSleepHeartRate",
+            "sleepBodyBatteryChange",
         ),
         "sleep",
     ),
@@ -297,6 +312,21 @@ CALORIES_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
 
 # Heart Rate Sensors
 HEART_RATE_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
+    # Newest sample Garmin has, i.e. from the last watch sync: not live heart
+    # rate. Opt-in: it costs a request per new sync.
+    GarminConnectSensorEntityDescription(
+        key="latestHeartRate",
+        translation_key="latest_heart_rate",
+        coordinator_context=LATEST_HEART_RATE_CONTEXT,
+        entity_registry_enabled_default=False,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="bpm",
+        attributes_fn=lambda data: (
+            {"measurement_time": data["latestHeartRateTime"]}
+            if data.get("latestHeartRateTime")
+            else {}
+        ),
+    ),
     GarminConnectSensorEntityDescription(
         key="restingHeartRate",
         translation_key="resting_heart_rate",
@@ -387,6 +417,59 @@ STRESS_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
     ),
 )
 
+# Garmin's sleepScores breakdown: each component carries a qualifier
+# (EXCELLENT/GOOD/FAIR/POOR) and the range Garmin considers optimal.
+_SLEEP_SCORE_COMPONENTS: dict[str, str] = {
+    "totalDuration": "duration",
+    "stress": "stress",
+    "awakeCount": "awakenings",
+    "restlessness": "restlessness",
+    "remPercentage": "rem",
+    "lightPercentage": "light",
+    "deepPercentage": "deep",
+}
+
+
+def _qualifier(component: dict[str, Any]) -> str | None:
+    """Lower-cased qualifier of one sleep score component, or None."""
+    qualifier = component.get("qualifierKey")
+    return qualifier.lower() if isinstance(qualifier, str) else None
+
+
+def _sleep_score_attributes(data: dict[str, Any]) -> dict[str, Any]:
+    """Qualifiers for the sleep score and its components, plus Garmin's feedback keys."""
+    scores = data.get("sleepScores") or {}
+    if not scores:
+        return {}
+    attributes: dict[str, Any] = {
+        "qualifier": _qualifier(scores.get("overall") or {}),
+    }
+    for garmin_key, name in _SLEEP_SCORE_COMPONENTS.items():
+        component = scores.get(garmin_key) or {}
+        attributes[f"{name}_qualifier"] = _qualifier(component)
+        if (value := component.get("value")) is not None:
+            attributes[f"{name}_percentage"] = value
+    attributes["feedback"] = data.get("sleepScoreFeedback")
+    attributes["insight"] = data.get("sleepScoreInsight")
+    attributes["personalized_insight"] = data.get("sleepScorePersonalizedInsight")
+    return attributes
+
+
+def _sleep_stress_attributes(data: dict[str, Any]) -> dict[str, Any]:
+    """Qualifier and optimal range Garmin scores the sleep stress against, plus the samples."""
+    stress = (data.get("sleepScores") or {}).get("stress") or {}
+    attributes: dict[str, Any] = {}
+    if stress:
+        attributes = {
+            "qualifier": _qualifier(stress),
+            "optimal_start": stress.get("optimalStart"),
+            "optimal_end": stress.get("optimalEnd"),
+        }
+    if samples := data.get("sleepStress"):
+        attributes["sleep_stress"] = samples
+    return attributes
+
+
 # Sleep Sensors — ha_garmin computes *Minutes from *Seconds
 SLEEP_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
     GarminConnectSensorEntityDescription(
@@ -457,6 +540,41 @@ SLEEP_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
         key="sleepScore",
         translation_key="sleep_score",
         state_class=SensorStateClass.MEASUREMENT,
+        preserve_value=True,
+        attributes_fn=lambda data: _sleep_score_attributes(data),
+    ),
+    GarminConnectSensorEntityDescription(
+        key="avgSleepStress",
+        translation_key="avg_sleep_stress",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="level",
+        preserve_value=True,
+        attributes_fn=lambda data: _sleep_stress_attributes(data),
+    ),
+    GarminConnectSensorEntityDescription(
+        key="awakeCount",
+        translation_key="sleep_awakenings",
+        state_class=SensorStateClass.MEASUREMENT,
+        preserve_value=True,
+    ),
+    GarminConnectSensorEntityDescription(
+        key="restlessMomentsCount",
+        translation_key="sleep_restless_moments",
+        state_class=SensorStateClass.MEASUREMENT,
+        preserve_value=True,
+    ),
+    GarminConnectSensorEntityDescription(
+        key="avgSleepHeartRate",
+        translation_key="avg_sleep_heart_rate",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="bpm",
+        preserve_value=True,
+    ),
+    GarminConnectSensorEntityDescription(
+        key="sleepBodyBatteryChange",
+        translation_key="sleep_body_battery_change",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
         preserve_value=True,
     ),
     GarminConnectSensorEntityDescription(
@@ -835,18 +953,141 @@ WELLNESS_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
     ),
 )
 
+def _valid_sync_timestamp(value: Any) -> datetime.datetime | None:
+    """Return an aware device-sync time, without guessing a timezone or epoch unit."""
+    if not isinstance(value, datetime.datetime):
+        return None
+    try:
+        return value if value.utcoffset() is not None else None
+    except (ValueError, OverflowError, TypeError):
+        return None
+
+
 # Sync Sensors
 SYNC_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
     GarminConnectSensorEntityDescription(
         key="lastSyncTimestamp",
+        value_fn=lambda data: _valid_sync_timestamp(data.get("lastSyncTimestamp")),
         translation_key="last_synced",
         device_class=SensorDeviceClass.TIMESTAMP,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
 )
 
+# Yesterday's final daily summary, so a day isn't lost when the watch only
+# uploads after midnight. Disabled by default: CoreCoordinator only fetches it
+# (one extra call per new watch sync) while one of these is enabled.
+YESTERDAY_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
+    GarminConnectSensorEntityDescription(
+        key="yesterdayAverageStressLevel",
+        translation_key="yesterday_avg_stress_level",
+        coordinator_context=YESTERDAY_CONTEXT,
+        entity_registry_enabled_default=False,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="level",
+        attributes_fn=lambda data: {"date": data.get("yesterdayDate")},
+    ),
+    GarminConnectSensorEntityDescription(
+        key="yesterdayMaxStressLevel",
+        translation_key="yesterday_max_stress_level",
+        coordinator_context=YESTERDAY_CONTEXT,
+        entity_registry_enabled_default=False,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="level",
+    ),
+    GarminConnectSensorEntityDescription(
+        key="yesterdayStressMinutes",
+        translation_key="yesterday_stress_duration",
+        coordinator_context=YESTERDAY_CONTEXT,
+        entity_registry_enabled_default=False,
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+    ),
+    GarminConnectSensorEntityDescription(
+        key="yesterdayHighStressMinutes",
+        translation_key="yesterday_high_stress_duration",
+        coordinator_context=YESTERDAY_CONTEXT,
+        entity_registry_enabled_default=False,
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+    ),
+    GarminConnectSensorEntityDescription(
+        key="yesterdayRestMinutes",
+        translation_key="yesterday_rest_stress_duration",
+        coordinator_context=YESTERDAY_CONTEXT,
+        entity_registry_enabled_default=False,
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+    ),
+    GarminConnectSensorEntityDescription(
+        key="yesterdayBodyBatteryHighest",
+        translation_key="yesterday_body_battery_highest",
+        coordinator_context=YESTERDAY_CONTEXT,
+        entity_registry_enabled_default=False,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+    ),
+    GarminConnectSensorEntityDescription(
+        key="yesterdayBodyBatteryLowest",
+        translation_key="yesterday_body_battery_lowest",
+        coordinator_context=YESTERDAY_CONTEXT,
+        entity_registry_enabled_default=False,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+    ),
+    GarminConnectSensorEntityDescription(
+        key="yesterdayBodyBatteryCharged",
+        translation_key="yesterday_body_battery_charged",
+        coordinator_context=YESTERDAY_CONTEXT,
+        entity_registry_enabled_default=False,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+    ),
+    GarminConnectSensorEntityDescription(
+        key="yesterdayBodyBatteryDrained",
+        translation_key="yesterday_body_battery_drained",
+        coordinator_context=YESTERDAY_CONTEXT,
+        entity_registry_enabled_default=False,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+    ),
+    GarminConnectSensorEntityDescription(
+        key="yesterdayRestingHeartRate",
+        translation_key="yesterday_resting_heart_rate",
+        coordinator_context=YESTERDAY_CONTEXT,
+        entity_registry_enabled_default=False,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="bpm",
+    ),
+    GarminConnectSensorEntityDescription(
+        key="yesterdayIntensityMinutes",
+        translation_key="yesterday_intensity_minutes",
+        coordinator_context=YESTERDAY_CONTEXT,
+        entity_registry_enabled_default=False,
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        attributes_fn=lambda data: {
+            "moderate": data.get("yesterdayModerateIntensityMinutes"),
+            "vigorous": data.get("yesterdayVigorousIntensityMinutes"),
+        },
+    ),
+    GarminConnectSensorEntityDescription(
+        key="yesterdayActiveCalories",
+        translation_key="yesterday_active_calories",
+        coordinator_context=YESTERDAY_CONTEXT,
+        entity_registry_enabled_default=False,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfEnergy.KILO_CALORIE,
+    ),
+)
+
 # All CORE sensor descriptions
 CORE_SENSOR_DESCRIPTIONS: tuple[GarminConnectSensorEntityDescription, ...] = (
+    *YESTERDAY_SENSORS,
     *ACTIVITY_SENSORS,
     *CALORIES_SENSORS,
     *HEART_RATE_SENSORS,
@@ -926,7 +1167,9 @@ ACTIVITY_TRACKING_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
         translation_key="today_scheduled_workout",
         coordinator_type=CoordinatorType.ACTIVITY,
         value_fn=lambda data: (data.get("todayScheduledWorkout") or {}).get("title"),
-        attributes_fn=lambda data: data.get("todayScheduledWorkout") or {},
+        attributes_fn=lambda data: _scheduled_workout_attributes(
+            data.get("todayScheduledWorkout") or {}
+        ),
     ),
     GarminConnectSensorEntityDescription(
         key="nextScheduledWorkout",
@@ -934,7 +1177,7 @@ ACTIVITY_TRACKING_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
         coordinator_type=CoordinatorType.ACTIVITY,
         value_fn=lambda data: (data.get("nextScheduledWorkout") or {}).get("title"),
         attributes_fn=lambda data: {
-            **(data.get("nextScheduledWorkout") or {}),
+            **_scheduled_workout_attributes(data.get("nextScheduledWorkout") or {}),
             "upcoming": data.get("scheduledWorkouts") or [],
         },
     ),
@@ -956,6 +1199,13 @@ ACTIVITY_TRACKING_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
         },
     ),
 )
+
+
+def _scheduled_workout_attributes(workout: dict[str, Any]) -> dict[str, Any]:
+    """The workout as ha-garmin returns it, plus one readable line per step."""
+    if not workout.get("workoutSteps"):
+        return workout
+    return {**workout, "steps_summary": steps_summary(workout)}
 
 
 def _goal_event_attributes(event: dict[str, Any]) -> dict[str, Any]:
@@ -1205,6 +1455,18 @@ TRAINING_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
 # Data from ha_garmin.fetch_body_data()
 # ha_garmin computes weightKg, boneMassKg, muscleMassKg via _add_computed_fields
 
+
+def _weigh_in_attributes(data: dict[str, Any]) -> dict[str, Any]:
+    """Return the time of the weigh-in from its UTC epoch milliseconds."""
+    timestamp_gmt = data.get("timestampGMT")
+    if isinstance(timestamp_gmt, bool) or not isinstance(timestamp_gmt, int | float):
+        return {}
+    try:
+        return {"measurement_time": dt_util.utc_from_timestamp(timestamp_gmt / 1000)}
+    except OverflowError, OSError, ValueError:
+        return {}
+
+
 BODY_COMPOSITION_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
     GarminConnectSensorEntityDescription(
         key="weightKg",
@@ -1214,6 +1476,7 @@ BODY_COMPOSITION_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfMass.KILOGRAMS,
         preserve_value=True,
+        attributes_fn=_weigh_in_attributes,
     ),
     GarminConnectSensorEntityDescription(
         key="bmi",
@@ -1337,6 +1600,27 @@ FITNESS_AGE_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
         suggested_display_precision=1,
     ),
     GarminConnectSensorEntityDescription(
+        key="vigorousDaysAvg",
+        translation_key="vigorous_days_avg",
+        coordinator_type=CoordinatorType.BODY,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="days",
+        suggested_display_precision=1,
+        value_fn=lambda data: _fitness_age_component(data, "vigorousDaysAvg").get("value"),
+        attributes_fn=lambda data: _fitness_age_component_attributes(data, "vigorousDaysAvg"),
+    ),
+    GarminConnectSensorEntityDescription(
+        key="vigorousMinutesAvg",
+        translation_key="vigorous_minutes_avg",
+        coordinator_type=CoordinatorType.BODY,
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        suggested_display_precision=0,
+        value_fn=lambda data: _fitness_age_component(data, "vigorousMinutesAvg").get("value"),
+        attributes_fn=lambda data: _fitness_age_component_attributes(data, "vigorousMinutesAvg"),
+    ),
+    GarminConnectSensorEntityDescription(
         key="metabolicAge",
         translation_key="metabolic_age",
         coordinator_type=CoordinatorType.BODY,
@@ -1361,6 +1645,33 @@ FITNESS_AGE_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
         preserve_value=True,
     ),
 )
+
+
+def _fitness_age_component(data: dict[str, Any], name: str) -> dict[str, Any]:
+    """Return one Fitness Age factor from fitness-age's components block."""
+    component = (data.get("components") or {}).get(name)
+    return component if isinstance(component, dict) else {}
+
+
+def _fitness_age_component_attributes(data: dict[str, Any], name: str) -> dict[str, Any]:
+    """Garmin's target for a Fitness Age factor and what reaching it is worth.
+
+    Vigorous days/minutes are weekly averages over numOfWeeksForIm weeks.
+    """
+    component = _fitness_age_component(data, name)
+    if not component:
+        return {}
+    return {
+        "target": component.get("targetValue"),
+        "potential_fitness_age": component.get("potentialAge"),
+        "weeks_averaged": component.get("numOfWeeksForIm"),
+        "stale": component.get("stale"),
+    }
+
+
+def _lifetime_totals_shown(data: dict[str, Any]) -> bool:
+    """False while the Garmin profile hides lifetime totals (a Repairs issue explains)."""
+    return not data.get("lifetimeTotalsHidden")
 
 
 # ── GOALS coordinator sensors ─────────────────────────────────────────────────
@@ -1409,6 +1720,8 @@ GOALS_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
     GarminConnectSensorEntityDescription(
         key="lifetimeSteps",
         translation_key="lifetime_steps",
+        coordinator_context=LIFETIME_CONTEXT,
+        available_fn=_lifetime_totals_shown,
         coordinator_type=CoordinatorType.GOALS,
         state_class=SensorStateClass.TOTAL_INCREASING,
         native_unit_of_measurement="steps",
@@ -1418,6 +1731,8 @@ GOALS_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
     GarminConnectSensorEntityDescription(
         key="lifetimeDistance",
         translation_key="lifetime_distance",
+        coordinator_context=LIFETIME_CONTEXT,
+        available_fn=_lifetime_totals_shown,
         coordinator_type=CoordinatorType.GOALS,
         device_class=SensorDeviceClass.DISTANCE,
         state_class=SensorStateClass.TOTAL_INCREASING,
@@ -1430,6 +1745,8 @@ GOALS_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
     GarminConnectSensorEntityDescription(
         key="lifetimeCalories",
         translation_key="lifetime_calories",
+        coordinator_context=LIFETIME_CONTEXT,
+        available_fn=_lifetime_totals_shown,
         coordinator_type=CoordinatorType.GOALS,
         state_class=SensorStateClass.TOTAL_INCREASING,
         native_unit_of_measurement=UnitOfEnergy.KILO_CALORIE,
@@ -1440,6 +1757,8 @@ GOALS_SENSORS: tuple[GarminConnectSensorEntityDescription, ...] = (
     GarminConnectSensorEntityDescription(
         key="lifetimeActiveDays",
         translation_key="lifetime_active_days",
+        coordinator_context=LIFETIME_CONTEXT,
+        available_fn=_lifetime_totals_shown,
         coordinator_type=CoordinatorType.GOALS,
         state_class=SensorStateClass.TOTAL_INCREASING,
         native_unit_of_measurement="days",
@@ -2219,10 +2538,10 @@ class GarminConnectSensor(CoordinatorEntity[BaseGarminCoordinator], RestoreSenso
     _attr_has_entity_name = True
     # The lastActivityRoute polyline is a full GPS track and blows past the recorder's
     # hard 16 KiB attribute cap, which makes it drop the entity's attributes wholesale.
-    # Keep it live-only for the map card and templates; the rest still records.
-    # The intraday body_battery/stress timelines are a full day of samples and are
-    # kept out for the same reason.
-    _unrecorded_attributes = frozenset({"polyline", "body_battery", "stress"})
+    # Bulk arrays remain available live but do not enter Recorder rows.
+    _unrecorded_attributes = frozenset(
+        {"polyline", "body_battery", "stress", "sleep_stress", "workoutSteps"}
+    )
 
     def __init__(
         self,
@@ -2231,7 +2550,7 @@ class GarminConnectSensor(CoordinatorEntity[BaseGarminCoordinator], RestoreSenso
         entry_id: str,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
+        super().__init__(coordinator, context=description.coordinator_context)
         self.entity_description = description
         self._attr_unique_id = f"{entry_id}_{description.key}"
         self._attr_device_info = DeviceInfo(
@@ -2277,7 +2596,8 @@ class GarminConnectSensor(CoordinatorEntity[BaseGarminCoordinator], RestoreSenso
         if not super().available:
             return False
         if self.coordinator.data is not None:
-            return True
+            available_fn = self.entity_description.available_fn
+            return available_fn is None or available_fn(self.coordinator.data)
         return self.entity_description.preserve_value and self._last_known_value is not None
 
     @property

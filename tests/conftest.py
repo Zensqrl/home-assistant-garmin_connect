@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.garmin_connect.const import (
     CONF_CLIENT_ID,
@@ -121,6 +121,19 @@ def mock_core_data() -> dict:
         "measurableAsleepDurationMinutes": 430,
         "measurableAwakeDurationMinutes": 20,
         "sleepScore": 82,
+        "avgSleepStress": 21.0,
+        "awakeCount": 2,
+        "restlessMomentsCount": 50,
+        "avgSleepHeartRate": 58.0,
+        "sleepBodyBatteryChange": 48,
+        "sleepScores": {
+            "overall": {"value": 82, "qualifierKey": "GOOD"},
+            "stress": {"qualifierKey": "FAIR", "optimalStart": 0.0, "optimalEnd": 15.0},
+            "remPercentage": {"value": 20, "qualifierKey": "FAIR"},
+        },
+        "sleepScoreFeedback": "POSITIVE_LONG_AND_DEEP",
+        "sleepScoreInsight": "NONE",
+        "sleepScorePersonalizedInsight": "RHYTHM_POS_GOOD_SLEEP",
         "deepSleepMinutes": 120,
         "lightSleepMinutes": 240,
         "remSleepMinutes": 120,
@@ -320,6 +333,8 @@ def mock_body_data() -> dict:
     """Sample data for BodyCoordinator (fetch_body_data output)."""
     return {
         "weightKg": 75.0,
+        "timestampGMT": 1792329232000,
+        "date": 1792336432000,
         "bmi": 24.5,
         "bodyFat": 18.5,
         "bodyWater": 60.0,
@@ -332,6 +347,25 @@ def mock_body_data() -> dict:
         "chronologicalAge": 35,
         "achievableFitnessAge": 27,
         "previousFitnessAge": 31,
+        "components": {
+            "vigorousDaysAvg": {
+                "value": 0.3,
+                "targetValue": 3,
+                "potentialAge": 54.0,
+                "priority": 2,
+                "stale": False,
+                "numOfWeeksForIm": 6,
+            },
+            "vigorousMinutesAvg": {
+                "value": 5.6,
+                "targetValue": 75,
+                "potentialAge": 54.0,
+                "priority": 1,
+                "stale": False,
+                "numOfWeeksForIm": 6,
+            },
+            "rhr": {"value": 52, "stale": False},
+        },
         "valueInML": 1500,
         "goalInML": 2000,
         "dailyAverageInML": 1800,
@@ -353,6 +387,7 @@ def mock_goals_data() -> dict:
         ],
         "userPoints": 500,
         "userLevel": 5,
+        "lifetimeTotalsHidden": False,
         "lifetimeTotals": {
             "totalSteps": 10428222,
             "totalDistance": 8123456.0,

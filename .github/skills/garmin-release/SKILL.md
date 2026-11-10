@@ -1,19 +1,21 @@
 ---
 name: garmin-release
-description: 'End-to-end release for the forked Garmin stack. Use when shipping a new ha-garmin library version and/or a new garmin_connect integration release — bumps versions, tags the library so GitHub Actions builds the wheel, repoints the integration manifest at that release asset, and tags the integration for HACS. Triggers: "release garmin", "ship the garmin change", "cut a new ha-garmin version", "publish the fork".'
+description: 'End-to-end release for the forked Garmin stack. Use when shipping a new ha-garmin library version and/or a new garmin_connect integration release — bumps versions, tags the library so GitHub Actions builds the wheel, repoints the integration manifest at that release asset, and publishes an integration tag plus GitHub release for HACS. Triggers: "release garmin", "ship the garmin change", "cut a new ha-garmin version", "publish the fork".'
 ---
 
 # Garmin fork release
 
-Ships changes from both workspace folders out to the user's own Home Assistant. Owner **`Zensqrl`**; the library is consumed from the fork's GitHub release assets, not PyPI.
+Publishes the forked stack for a separately approved Home Assistant rollout. Owner **`Zensqrl`**; the library is consumed from the fork's GitHub release assets, not PyPI.
 
 Branching, merge strategy and version-identity rules come from the **fork-maintenance** skill and the fork profiles in [CLAUDE.md](../../../CLAUDE.md) and the library's `AGENTS.md`. Load them; this skill covers only the Garmin-specific pipeline.
 
 To send a change to `cyberjunky` instead, use `garmin-upstream-pr`. Never run the two on the same branch.
 
 ```
-bump library → tag → CI builds wheel → repoint integration pin → bump integration → tag → HACS
+bump library → tag → CI builds wheel → repoint integration pin → bump integration → tag + GitHub release → HACS
 ```
+
+All phases below are subordinate to the specific approved plan. Do not bypass its PR, validation, publication or separate installation/restart gates.
 
 ## Phase 0 — Scope and branch
 
@@ -92,7 +94,7 @@ On the **first** release using a `+zs<n>` version, confirm GitHub did not mangle
 
 Then update both files together — a half-updated state declares one source and installs another:
 
-- [manifest.json](../../../custom_components/garmin_connect/manifest.json) → `"requirements": ["ha-garmin @ https://github.com/Zensqrl/ha-garmin/releases/download/v<lib>/ha_garmin-<lib>-py3-none-any.whl"]`
+- [manifest.json](../../../custom_components/garmin_connect/manifest.json) → `"requirements": ["ha-garmin@https://github.com/Zensqrl/ha-garmin/releases/download/v<lib>/ha_garmin-<lib>-py3-none-any.whl"]`
 - [requirements.txt](../../../requirements.txt) → the same string on the `ha-garmin` line
 
 Grep the workspace for the old version string and confirm only the expected files changed.
@@ -109,27 +111,33 @@ scripts/test && scripts/lint
 
 The suite mocks the library, so it passes without the new wheel installed locally. For a real end-to-end check, `pip install <asset-url>` into the integration's `.venv` and run `scripts/develop`.
 
-**Expect hassfest to fail** on the direct-reference requirement. That is the accepted cost of running a forked library — report it, never revert the pin to satisfy it.
+Keep manifest requirements in no-space `name@url` form. Require HACS and hassfest green for the exact candidate before merge; investigate failures without reverting the fork pin to PyPI or granting a blanket waiver. HACS may retain only its existing `brands` exclusion. Record the run, checked source/ref and available validator image identity.
 
-## Phase 6 — Commit and tag the integration
+## Phase 6 — Merge and publish the integration
 
-```bash
-git add -A
-git commit -m "Release <integration> (ha-garmin <lib>)"
-git push origin main
-git tag -a "v<integration>" -m "v<integration>"
-git push origin "v<integration>"
-```
+Follow the specifically approved publication plan. Finish planned commits before
+opening the PR, and preserve upstream ancestry with merge commits, never squash
+or rebase. Require the final candidate's checks and required reviews before merge.
+Verify the resulting remote `main` commit and tree before releasing from it.
 
-Same approval gate as phase 3 before either push. HACS reads GitHub releases, so this tag is what makes the update appear in Home Assistant.
+Same explicit approval gate as phase 3 applies before publication. Recheck the
+integration tag and release do not exist; never replace or move them. Tag the
+verified `main` commit, then create an explicit GitHub release for that tag.
+A tag push alone is not completion: there is no integration release-building
+workflow or custom ZIP asset. Verify the published release, peeled tag commit,
+generated source archive contents/hash, manifest version and exact wheel pin.
+Reuse the existing matching library release for integration-only changes.
+
+Installation, backup/rollback preparation and restart are separate rollout gates;
+a publication approval does not authorize them.
 
 ## Report
 
 - Library old → new version, tag, release URL
 - The requirement string now in the manifest
-- Integration old → new version, tag
-- Both suites' results, and the expected hassfest failure
-- Remaining manual step: open HACS, update the integration, restart
+- Integration old → new version, tag, explicit release URL and source archive verification
+- Both suites' results, and exact-candidate HACS/hassfest results
+- Remaining separately approved rollout gates: backup/rollback readiness, HACS installation, restart and acceptance
 
 ## Never
 

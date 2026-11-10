@@ -17,7 +17,6 @@ from ha_garmin.exceptions import GarminAuthError, GarminConnectError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -125,6 +124,11 @@ class BaseGarminCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Update the coordinator's polling interval."""
         self.update_interval = update_interval
 
+    @property
+    def has_listeners(self) -> bool:
+        """Return True if an enabled entity or other listener uses this data."""
+        return bool(self._listeners)
+
     async def _fetch(self) -> dict[str, Any]:
         """Fetch this coordinator's data from Garmin Connect."""
         raise NotImplementedError
@@ -173,14 +177,143 @@ class BaseGarminCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._update_tokens_if_changed()
 
 
+# Coordinator context of the latest heart rate sensor: its samples are only
+# fetched while it (disabled by default) is enabled.
+LATEST_HEART_RATE_CONTEXT = "latest_heart_rate"
+
+
+def connect_plus_issue_id(entry_id: str) -> str:
+    """Repair issue raised while nutrition data needs Garmin Connect+."""
+    return f"nutrition_connect_plus_required_{entry_id}"
+
+
+def lifetime_hidden_issue_id(entry_id: str) -> str:
+    """Repair issue raised while the Garmin profile hides lifetime totals."""
+    return f"lifetime_totals_hidden_{entry_id}"
+
+
+# Coordinator context of the lifetime sensors: lifetime totals are only fetched
+# while at least one of them (disabled by default) is enabled.
+LIFETIME_CONTEXT = "lifetime"
+
+# Coordinator context of the yesterday sensors: yesterday's summary is only
+# fetched while at least one of them (disabled by default) is enabled.
+YESTERDAY_CONTEXT = "yesterday"
+
+# Core contexts that add API calls to the core fetch.
+_CORE_OPT_IN_CONTEXTS = frozenset({LATEST_HEART_RATE_CONTEXT, YESTERDAY_CONTEXT})
+
+
+def summarize_day(raw: dict[str, Any], day: date) -> dict[str, Any]:
+    """Map a raw Garmin daily summary to the 'yesterday*' fields.
+
+    Garmin reports stress as -1/-2 when there isn't enough data; those become None.
+    """
+
+    def _stress(value: Any) -> Any:
+        return value if isinstance(value, (int, float)) and value >= 0 else None
+
+    def _minutes(seconds: Any) -> Any:
+        return round(seconds / 60) if isinstance(seconds, (int, float)) else None
+
+    moderate = raw.get("moderateIntensityMinutes")
+    vigorous = raw.get("vigorousIntensityMinutes")
+    intensity = (
+        (moderate or 0) + (vigorous or 0) * 2
+        if moderate is not None or vigorous is not None
+        else None
+    )
+    return {
+        "yesterdayDate": raw.get("calendarDate") or day.isoformat(),
+        "yesterdayAverageStressLevel": _stress(raw.get("averageStressLevel")),
+        "yesterdayMaxStressLevel": _stress(raw.get("maxStressLevel")),
+        "yesterdayStressMinutes": _minutes(raw.get("stressDuration")),
+        "yesterdayHighStressMinutes": _minutes(raw.get("highStressDuration")),
+        "yesterdayRestMinutes": _minutes(raw.get("restStressDuration")),
+        "yesterdayBodyBatteryHighest": raw.get("bodyBatteryHighestValue"),
+        "yesterdayBodyBatteryLowest": raw.get("bodyBatteryLowestValue"),
+        "yesterdayBodyBatteryCharged": raw.get("bodyBatteryChargedValue"),
+        "yesterdayBodyBatteryDrained": raw.get("bodyBatteryDrainedValue"),
+        "yesterdayRestingHeartRate": raw.get("restingHeartRate"),
+        "yesterdayIntensityMinutes": intensity,
+        "yesterdayModerateIntensityMinutes": moderate,
+        "yesterdayVigorousIntensityMinutes": vigorous,
+        "yesterdayActiveCalories": raw.get("activeKilocalories"),
+        "yesterdayFloorsAscended": raw.get("floorsAscended"),
+    }
+
+
 class CoreCoordinator(BaseGarminCoordinator):
-    """Coordinator for core data: summary, steps, sleep (~50 sensors)."""
+    """Coordinator for core data: summary, steps, sleep (~50 sensors).
+
+    Also keeps yesterday's final daily summary (stress, Body Battery, resting
+    HR, intensity minutes), so a day isn't lost when the watch only uploads
+    after midnight. Only while a yesterday sensor is enabled, and only
+    re-fetched when the date rolls or a new watch sync lands: the only times
+    those figures can change.
+    """
 
     data_name = "core"
 
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        client: GarminClient,
+        auth: GarminAuth,
+    ) -> None:
+        """Initialize."""
+        super().__init__(hass, entry, client, auth)
+        self._yesterday: dict[str, Any] = {}
+        self._yesterday_date: date | None = None
+        self._yesterday_sync: Any = None
+
+    @property
+    def has_opt_in_listeners(self) -> bool:
+        """Return True if an enabled sensor needs data beyond the core fetch."""
+        return not _CORE_OPT_IN_CONTEXTS.isdisjoint(self.async_contexts())
+
     async def _fetch(self) -> dict[str, Any]:
-        """Fetch core data."""
-        return await self.client.fetch_core_data()
+        """Fetch core data, plus yesterday's summary and latest heart rate if used."""
+        contexts = set(self.async_contexts())
+        data = await self.client.fetch_core_data(
+            latest_heart_rate=LATEST_HEART_RATE_CONTEXT in contexts
+        )
+        if YESTERDAY_CONTEXT not in contexts:
+            return data
+        try:
+            yesterday = await self._yesterday_summary(data.get("lastSyncTimestamp"))
+        except (GarminConnectError, ClientError) as err:
+            _LOGGER.debug("Error fetching yesterday's summary: %s", err)
+            yesterday = {}
+        return {**data, **yesterday}
+
+    async def _yesterday_summary(self, last_sync: Any) -> dict[str, Any]:
+        """Return yesterday's summary, re-fetched on a new day or watch sync.
+
+        A failed or empty fetch leaves the cache as it was, so the next poll
+        retries.
+        """
+        target = self.client.today() - timedelta(days=1)
+        if target != self._yesterday_date or last_sync != self._yesterday_sync:
+            raw = await self.client._get_user_summary_raw(target)  # noqa: SLF001
+            if not raw:
+                return {}
+            self._yesterday = summarize_day(raw, target)
+            self._yesterday_date = target
+            self._yesterday_sync = last_sync
+        return self._yesterday
+
+    async def async_get_day(self, day: date) -> dict[str, Any]:
+        """Return the mapped and raw daily summary for any date."""
+        raw = await self.client._get_user_summary_raw(day)  # noqa: SLF001
+        fields = {
+            key.removeprefix("yesterday")[:1].lower() + key.removeprefix("yesterday")[1:]: value
+            for key, value in summarize_day(raw or {}, day).items()
+        }
+        fields["totalSteps"] = (raw or {}).get("totalSteps")
+        fields["totalDistanceMeters"] = (raw or {}).get("totalDistanceMeters")
+        return {"summary": fields, "raw": raw or {}}
 
 
 class ActivityCoordinator(BaseGarminCoordinator):
@@ -219,8 +352,36 @@ class GoalsCoordinator(BaseGarminCoordinator):
     data_name = "goals"
 
     async def _fetch(self) -> dict[str, Any]:
-        """Fetch goals data."""
-        return await self.client.fetch_goals_data()
+        """Fetch goals data; lifetime totals only if a lifetime sensor is enabled."""
+        return await self.client.fetch_goals_data(
+            lifetime_totals=LIFETIME_CONTEXT in self.async_contexts()
+        )
+
+    @property
+    def _lifetime_hidden_issue_id(self) -> str:
+        return lifetime_hidden_issue_id(self.config_entry.entry_id)
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        """Fetch goals data and raise a repair issue while lifetime totals are hidden.
+
+        Garmin refuses them unless "Lifetime Totals" is shown in the user's
+        profile; the issue says how, and goes away once they come through or
+        the lifetime sensors are disabled.
+        """
+        data = await super()._async_update_data()
+        if data.get("lifetimeTotalsHidden"):
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                self._lifetime_hidden_issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key="lifetime_totals_hidden",
+                translation_placeholders={"title": self.config_entry.title},
+            )
+        else:
+            ir.async_delete_issue(self.hass, DOMAIN, self._lifetime_hidden_issue_id)
+        return data
 
 
 class GearCoordinator(BaseGarminCoordinator):
@@ -277,22 +438,7 @@ class NutritionCoordinator(BaseGarminCoordinator):
 
     @property
     def _connect_plus_issue_id(self) -> str:
-        return f"nutrition_connect_plus_required_{self.config_entry.entry_id}"
-
-    def _has_enabled_nutrition_entity(self) -> bool:
-        """Return True if the user has enabled at least one nutrition sensor.
-
-        Nutrition sensors are disabled by default and this coordinator polls
-        unconditionally regardless of that, so most installs never touch the
-        feature at all. An empty response is only worth surfacing if the user
-        has actually opted in by enabling a nutrition sensor.
-        """
-        registry = er.async_get(self.hass)
-        prefix = f"{self.config_entry.entry_id}_nutrition"
-        return any(
-            entry.unique_id.startswith(prefix) and entry.disabled_by is None
-            for entry in er.async_entries_for_config_entry(registry, self.config_entry.entry_id)
-        )
+        return connect_plus_issue_id(self.config_entry.entry_id)
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch nutrition data and track empty days for the Connect+ repair issue."""
@@ -307,12 +453,6 @@ class NutritionCoordinator(BaseGarminCoordinator):
             ir.async_delete_issue(self.hass, DOMAIN, self._connect_plus_issue_id)
         elif self._ever_had_data:
             pass  # A later gap just means no food was logged, not a missing subscription.
-        elif not self._has_enabled_nutrition_entity():
-            # Feature not opted into - never nag, and start a fresh debounce window
-            # if the user enables it later.
-            self._empty_days = 0
-            self._last_empty_date = None
-            ir.async_delete_issue(self.hass, DOMAIN, self._connect_plus_issue_id)
         else:
             today = dt_util.now().date()
             if today != self._last_empty_date:

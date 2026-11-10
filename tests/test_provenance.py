@@ -101,7 +101,9 @@ async def test_library_calendar_day_and_last_success(coordinator_type, method):
     coordinator._update_tokens_if_changed = MagicMock()
     # Client resolves Garmin's calendar day from its account/device timezone.
     data = await coordinator._async_update_data()
-    fetch.assert_awaited_once_with()
+    fetch.assert_awaited_once_with(
+        **({"latest_heart_rate": False} if coordinator_type is CoreCoordinator else {})
+    )
     coordinator.data = data
     fetch.return_value = {"_sources": {"summary": {"outcome": "error", "fetched_at": "later"}}}
     failed = await coordinator._async_update_data()
