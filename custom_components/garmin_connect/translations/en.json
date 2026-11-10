@@ -72,12 +72,10 @@
     "step": {
       "init": {
         "data": {
-          "scan_interval": "Update interval (seconds)",
-          "is_cn": "Use Garmin Connect China (cn.garmin.com)"
+          "scan_interval": "Update interval (seconds)"
         },
         "data_description": {
-          "scan_interval": "How often to fetch data from Garmin Connect (60–3600 seconds)",
-          "is_cn": "Enable for accounts registered on the Chinese Garmin Connect platform"
+          "scan_interval": "How often to fetch data from Garmin Connect (60–3600 seconds)"
         },
         "description": "Configure your Garmin Connect integration settings.",
         "title": "Garmin Connect Options"
@@ -104,6 +102,11 @@
       "avg_altitude": { "name": "Average altitude" },
       "avg_sleep_respiration": { "name": "Average sleep respiration" },
       "skin_temp_change": { "name": "Skin temperature change" },
+      "avg_sleep_stress": { "name": "Average sleep stress" },
+      "sleep_awakenings": { "name": "Sleep awakenings" },
+      "sleep_restless_moments": { "name": "Sleep restless moments" },
+      "avg_sleep_heart_rate": { "name": "Average sleep heart rate" },
+      "sleep_body_battery_change": { "name": "Sleep body battery change" },
       "avg_solar_intensity": { "name": "Average solar intensity" },
       "avg_spo2": { "name": "Average SpO2" },
       "avg_stress_level": { "name": "Average stress level" },
@@ -134,6 +137,8 @@
       "devices": { "name": "Devices" },
       "endurance_score": { "name": "Endurance score" },
       "fitness_age": { "name": "Fitness age" },
+      "vigorous_days_avg": { "name": "Vigorous days per week" },
+      "vigorous_minutes_avg": { "name": "Vigorous minutes per week" },
       "floors_ascended": { "name": "Floors ascended" },
       "floors_ascended_distance": { "name": "Floors ascended distance" },
       "floors_ascended_goal": { "name": "Floors ascended goal" },
@@ -218,6 +223,7 @@
       "rest_stress_duration": { "name": "Rest stress duration" },
       "rest_stress_percentage": { "name": "Rest stress percentage" },
       "resting_heart_rate": { "name": "Resting heart rate" },
+      "latest_heart_rate": { "name": "Latest heart rate" },
       "sedentary_time": { "name": "Sedentary time" },
       "sleep_need": { "name": "Sleep need" },
       "bedtime": { "name": "Bedtime" },
@@ -267,13 +273,33 @@
       "wellness_end_time": { "name": "Wellness end time" },
       "wellness_start_time": { "name": "Wellness start time" },
       "yesterday_distance": { "name": "Yesterday distance" },
-      "yesterday_steps": { "name": "Yesterday steps" }
+      "yesterday_steps": { "name": "Yesterday steps" },
+      "yesterday_active_calories": { "name": "Yesterday active calories" },
+      "yesterday_avg_stress_level": { "name": "Yesterday average stress level" },
+      "yesterday_body_battery_charged": { "name": "Yesterday body battery charged" },
+      "yesterday_body_battery_drained": { "name": "Yesterday body battery drained" },
+      "yesterday_body_battery_highest": { "name": "Yesterday body battery highest" },
+      "yesterday_body_battery_lowest": { "name": "Yesterday body battery lowest" },
+      "yesterday_high_stress_duration": { "name": "Yesterday high stress duration" },
+      "yesterday_intensity_minutes": { "name": "Yesterday intensity minutes" },
+      "yesterday_max_stress_level": { "name": "Yesterday max stress level" },
+      "yesterday_resting_heart_rate": { "name": "Yesterday resting heart rate" },
+      "yesterday_rest_stress_duration": { "name": "Yesterday rest stress duration" },
+      "yesterday_stress_duration": { "name": "Yesterday stress duration" }
     },
     "calendar": {
       "scheduled_workouts": { "name": "Scheduled workouts" }
     }
   },
   "services": {
+    "get_day_summary": {
+      "name": "Get day summary",
+      "description": "Fetch the daily summary (steps, stress, Body Battery, resting heart rate, intensity minutes) for any date from Garmin Connect and return it.",
+      "fields": {
+        "date": { "name": "Date", "description": "The day to fetch." },
+        "entity_id": { "name": "Entity", "description": "Optional Garmin Connect entity whose account to read." }
+      }
+    },
     "set_active_gear": {
       "name": "Set active gear",
       "description": "Set gear as active/default for an activity type.",
@@ -419,6 +445,7 @@
     }
   },
   "exceptions": {
+    "get_day_summary_failed": { "message": "Failed to fetch the day summary: {error}" },
     "add_blood_pressure_failed": { "message": "Failed to add blood pressure: {error}" },
     "add_hydration_failed": { "message": "Failed to log hydration: {error}" },
     "add_nutrition_failed": { "message": "Failed to log nutrition: {error}" },
@@ -449,6 +476,10 @@
     "connect_plus_required": {
       "title": "Nutrition data requires Garmin Connect+",
       "description": "Nutrition sensors for {title} are unavailable because your Garmin account does not have an active Connect+ subscription. Subscribe to Connect+ in the Garmin Connect app to enable nutrition logging, or disable the nutrition sensors for this integration."
+    },
+    "lifetime_totals_hidden": {
+      "title": "Garmin hides your lifetime totals",
+      "description": "Garmin Connect refuses the lifetime totals for {title}, so the Lifetime steps, distance, calories and active days sensors are unavailable. Garmin only provides them when they are shown in your profile: in Garmin Connect on the web, open Account Settings → Public Profile, and under \"Show in profile\" enable Lifetime Totals. Your profile can stay visible to \"Only me\", so nothing becomes public. The sensors update on the next refresh. If you don't want these sensors, disable them instead."
     }
   }
 }

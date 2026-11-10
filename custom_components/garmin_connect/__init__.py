@@ -14,6 +14,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 
@@ -29,6 +30,7 @@ from .const import (
     FRONTEND_URL_BASE,
 )
 from .coordinator import (
+    LIFETIME_CONTEXT,
     ActivityCoordinator,
     BloodPressureCoordinator,
     BodyCoordinator,
@@ -40,6 +42,8 @@ from .coordinator import (
     MenstrualCoordinator,
     NutritionCoordinator,
     TrainingCoordinator,
+    connect_plus_issue_id,
+    lifetime_hidden_issue_id,
 )
 from .services import async_setup_services
 
@@ -227,11 +231,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: GarminConnectConfigEntry
 
     # Register entities and their listeners before data arrives. Entry-owned
     # background tasks do not hold HA startup open and are cancelled on unload.
+    # A coordinator no enabled entity listens to is never fetched or polled.
+    # Core's first refresh ran before its sensors existed, so it is refreshed
+    # again once if an enabled sensor needs its opt-in data.
     for coord in coordinators:
-        if coord is not coordinators.core:
+        if coord is coordinators.core:
+            needs_refresh = coordinators.core.has_opt_in_listeners
+        else:
+            needs_refresh = coord.has_listeners
+        if needs_refresh:
             entry.async_create_background_task(
                 hass, coord.async_refresh(), f"Garmin initial {coord.data_name} refresh"
             )
+
+    # Unpolled coordinators can't clear their own repair issues.
+    if not coordinators.nutrition.has_listeners:
+        ir.async_delete_issue(hass, DOMAIN, connect_plus_issue_id(entry.entry_id))
+    if LIFETIME_CONTEXT not in set(coordinators.goals.async_contexts()):
+        ir.async_delete_issue(hass, DOMAIN, lifetime_hidden_issue_id(entry.entry_id))
 
     return True
 
@@ -260,3 +277,12 @@ async def async_options_update_listener(
 async def async_unload_entry(hass: HomeAssistant, entry: GarminConnectConfigEntry) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: GarminConnectConfigEntry) -> None:
+    """Remove the entry's repair issues along with it."""
+    for issue_id in (
+        connect_plus_issue_id(entry.entry_id),
+        lifetime_hidden_issue_id(entry.entry_id),
+    ):
+        ir.async_delete_issue(hass, DOMAIN, issue_id)

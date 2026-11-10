@@ -63,7 +63,7 @@ fork-profile:
 The `ha-garmin` dependency is **not** taken from PyPI — it is a PEP 508 direct reference to a wheel attached to a GitHub release on the `Zensqrl/ha-garmin` fork:
 
 ```
-ha-garmin @ https://github.com/Zensqrl/ha-garmin/releases/download/v<x.y.z>/ha_garmin-<x.y.z>-py3-none-any.whl
+ha-garmin@https://github.com/Zensqrl/ha-garmin/releases/download/v<x.y.z>/ha_garmin-<x.y.z>-py3-none-any.whl
 ```
 
 Home Assistant pip-installs that URL at setup time, so the release asset must already exist before the pin is written — a dangling URL fails integration setup. Bumping means editing **both** [requirements.txt](requirements.txt) and `requirements` in [manifest.json](custom_components/garmin_connect/manifest.json).
@@ -72,7 +72,7 @@ Home Assistant pip-installs that URL at setup time, so the release asset must al
 
 HACS installs only copy `custom_components/garmin_connect/` — it does not manage Python dependencies, and manifest requirements are resolved before any config entry is read, so the source cannot be made configurable per install.
 
-The **hassfest** job fails on this pin — its requirements check rejects any requirement containing a space, which a PEP 508 direct reference (`name @ url`) always does. That is the accepted cost of the fork — do not "fix" it by reverting to PyPI. It passing on an upstream PR branch is the proof the pin was left behind.
+Keep the manifest direct reference in no-space `name@url` form. **Hassfest and HACS must pass for the exact candidate before merge**; a direct URL is not a blanket waiver for failure. Investigate failures without reverting the fork pin to PyPI. HACS retains only its existing `brands` exclusion. Record the checked source/ref and validator run; pinned action commits can still resolve mutable container images.
 
 **HACS validation** must stay green, and needs two settings GitHub does not carry over when forking: the Issues tab enabled, and repository topics set (`garmin-connect`, `home-assistant`, `home-assistant-component`). Both are one-time.
 
@@ -82,7 +82,7 @@ It carries a **fourth component** identifying the fork build on top of an upstre
 
 Do **not** use a PEP 440 local version here, as the library does. HACS compares with `awesomeversion`, which classifies `3.0.16+zs1` as SemVer and ignores build metadata for precedence, so `3.0.16+zs1 > 3.0.16` is **false** — the update would never be offered, silently. A SemVer prerelease (`3.0.16-zs1`) is worse, sorting below the base. The four-part form parses as SIMPLEVER and orders correctly, including across a base change (`3.0.17.0 > 3.0.16.3`).
 
-Don't do any of this by hand: the `garmin-release` skill ([.github/skills/garmin-release/SKILL.md](.github/skills/garmin-release/SKILL.md)) runs the whole pipeline — bump, commit, tag the library so Actions builds the wheel, repoint the pin, bump and tag the integration.
+Use the `garmin-release` skill ([.github/skills/garmin-release/SKILL.md](.github/skills/garmin-release/SKILL.md)) only within the specifically approved plan. Integration-only releases must reuse an already published matching library; do not republish it. After an ancestry-preserving merge and exact-main verification, an integration release requires both a version tag and an explicit GitHub release. This repository has no integration release-building workflow or custom ZIP asset. Verify the generated source archive, manifest and dependency pin. Older skill text describing expected hassfest failure or tag-only publication is superseded by these gates. Installation and restart require their own approved rollout plan.
 
 ## Contributing upstream
 
@@ -129,7 +129,7 @@ Gear and power-to-weight sensors are created dynamically from list data rather t
 
 ### Large attributes and Recorder
 
-Home Assistant's recorder drops **all** attributes for a state whose attribute blob exceeds 16 KiB, so any sensor exposing a big array must keep it out of the database. `GarminConnectSensor` declares a class-level `_unrecorded_attributes = frozenset({"polyline"})` for exactly this reason — it must be a class attribute, not set per instance or per entity description. New bulk attributes (timelines, coordinate lists, per-sample arrays) belong in that frozenset, and a sibling sensor sharing the same payload should strip the array from its own `attributes_fn` (see how `lastActivity` excludes `polyline`). Unrecorded attributes still live in the state machine and are sent to the frontend, so keep them compact anyway. The `test_route_*` tests in [tests/test_sensor.py](tests/test_sensor.py) are the template for proving both the exclusion and the 16 KiB ceiling.
+Home Assistant's recorder drops **all** attributes for a state whose attribute blob exceeds 16 KiB, so any sensor exposing a big array must keep it out of the database. `GarminConnectSensor` declares a class-level `_unrecorded_attributes = frozenset({"polyline", "body_battery", "stress", "sleep_stress", "workoutSteps"})` for exactly this reason — it must be a class attribute, not set per instance or per entity description. New bulk attributes (timelines, coordinate lists, per-sample arrays) belong in that frozenset, and a sibling sensor sharing the same payload should strip the array from its own `attributes_fn` (see how `lastActivity` excludes `polyline`). Unrecorded attributes still live in the state machine and are sent to the frontend, so keep them compact anyway. The `test_route_*` and `test_timeline_*` tests in [tests/test_sensor.py](tests/test_sensor.py) exercise the real HA encoder using synthetic states with manually supplied exclusion metadata. They do not establish actual entity publication or Recorder database persistence. Check those separately during acceptance; summaries and nested sibling payloads must also stay below the size cap.
 
 ### Services
 

@@ -4,6 +4,7 @@ import datetime
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 
 from custom_components.garmin_connect.sensor import (
@@ -11,12 +12,14 @@ from custom_components.garmin_connect.sensor import (
     ACTIVITY_TRACKING_SENSORS,
     BLOOD_PRESSURE_SENSORS,
     BODY_COMPOSITION_SENSORS,
+    FITNESS_AGE_SENSORS,
     GEAR_SENSORS,
     GOALS_SENSORS,
     HEALTH_MONITORING_SENSORS,
     INTRADAY_TIMELINE_SENSORS,
     MENSTRUAL_CYCLE_SENSORS,
     NUTRITION_SENSORS,
+    SLEEP_SENSORS,
     TRAINING_SENSORS,
     CoordinatorType,
     GarminConnectGearSensor,
@@ -107,6 +110,65 @@ def test_menstrual_sensors_disabled_by_default() -> None:
         )
 
 
+def test_yesterday_summary_sensors_disabled_and_fetched_on_demand():
+    """Yesterday's summary sensors cost an API call, so they're opt-in.
+
+    Their coordinator context lets CoreCoordinator skip the fetch while none
+    is enabled. Yesterday steps/distance come free with today's data.
+    """
+    from custom_components.garmin_connect.coordinator import YESTERDAY_CONTEXT
+
+    on_demand = [d for d in _all_descriptions() if d.coordinator_context == YESTERDAY_CONTEXT]
+    assert len(on_demand) == 12
+    assert all(d.entity_registry_enabled_default is False for d in on_demand)
+
+    coord = MagicMock()
+    with patch(
+        "homeassistant.helpers.update_coordinator.CoordinatorEntity.__init__",
+        return_value=None,
+    ) as base_init:
+        GarminConnectSensor(coord, on_demand[0], "entry_id")
+    base_init.assert_called_once_with(coord, context=YESTERDAY_CONTEXT)
+
+
+def test_latest_heart_rate_sensor():
+    """Opt-in; value and measurement_time come from ha-garmin's latest sample."""
+    from custom_components.garmin_connect.coordinator import LATEST_HEART_RATE_CONTEXT
+
+    desc = next(d for d in _all_descriptions() if d.key == "latestHeartRate")
+    assert desc.entity_registry_enabled_default is False
+    assert desc.coordinator_context == LATEST_HEART_RATE_CONTEXT
+
+    measured = datetime.datetime(2026, 10, 30, 5, 48, tzinfo=datetime.UTC)
+    coord = MagicMock()
+    coord.data = {"latestHeartRate": 56, "latestHeartRateTime": measured}
+    sensor = GarminConnectSensor(coord, desc, "entry_id")
+    assert sensor.native_value == 56
+    assert sensor.extra_state_attributes == {"measurement_time": measured}
+
+    coord.data = {"latestHeartRate": None, "latestHeartRateTime": None}
+    assert sensor.native_value is None
+    assert sensor.extra_state_attributes == {}
+
+
+def test_lifetime_sensors_preserve_defaults_and_unavailable_while_hidden():
+    """Keep fork default enablement; explain unavailable totals when the profile hides them."""
+    from custom_components.garmin_connect.coordinator import LIFETIME_CONTEXT
+
+    lifetime = [d for d in GOALS_SENSORS if d.key.startswith("lifetime")]
+    assert len(lifetime) == 4
+    assert all(d.coordinator_context == LIFETIME_CONTEXT for d in lifetime)
+    assert all(d.entity_registry_enabled_default is True for d in lifetime)
+
+    coord = MagicMock()
+    coord.last_update_success = True
+    sensor = GarminConnectSensor(coord, lifetime[0], "entry_id")
+    coord.data = mock_goals_data()
+    assert sensor.available is True
+    coord.data = {**mock_goals_data(), "lifetimeTotals": {}, "lifetimeTotalsHidden": True}
+    assert sensor.available is False
+
+
 def test_nutrition_sensors_disabled_by_default() -> None:
     """All nutrition sensors must be disabled by default (Connect+ feature)."""
     for desc in NUTRITION_SENSORS:
@@ -143,6 +205,94 @@ def test_skin_temp_change_sensor() -> None:
     assert description.device_class is SensorDeviceClass.TEMPERATURE_DELTA
     assert sensor.native_value == 0.2
     assert sensor.extra_state_attributes == {"calibration_days": 19}
+
+
+def test_sleep_score_attributes() -> None:
+    """Sleep score carries Garmin's per-component qualifiers and feedback keys."""
+    coordinator = MagicMock()
+    coordinator.data = {
+        "sleepScore": 85,
+        "sleepScores": {
+            "overall": {"value": 85, "qualifierKey": "GOOD"},
+            "totalDuration": {"qualifierKey": "EXCELLENT"},
+            "stress": {"qualifierKey": "FAIR", "optimalStart": 0.0, "optimalEnd": 15.0},
+            "remPercentage": {"value": 20, "qualifierKey": "FAIR"},
+        },
+        "sleepScoreFeedback": "POSITIVE_LONG_AND_DEEP",
+        "sleepScoreInsight": "NONE",
+        "sleepScorePersonalizedInsight": "RHYTHM_POS_GOOD_SLEEP",
+    }
+    description = next(d for d in SLEEP_SENSORS if d.key == "sleepScore")
+    sensor = GarminConnectSensor(coordinator, description, "test_entry_id")
+    assert sensor.native_value == 85
+    attributes = sensor.extra_state_attributes
+    assert attributes["qualifier"] == "good"
+    assert attributes["duration_qualifier"] == "excellent"
+    assert attributes["stress_qualifier"] == "fair"
+    assert attributes["rem_qualifier"] == "fair"
+    assert attributes["rem_percentage"] == 20
+    assert attributes["deep_qualifier"] is None
+    assert "deep_percentage" not in attributes
+    assert attributes["feedback"] == "POSITIVE_LONG_AND_DEEP"
+    assert attributes["personalized_insight"] == "RHYTHM_POS_GOOD_SLEEP"
+
+
+def test_sleep_score_attributes_empty_without_scores() -> None:
+    """No sleep yet (midnight) -> no attributes rather than a dict of Nones."""
+    coordinator = MagicMock()
+    coordinator.data = {"sleepScore": None, "sleepScores": None}
+    description = next(d for d in SLEEP_SENSORS if d.key == "sleepScore")
+    sensor = GarminConnectSensor(coordinator, description, "test_entry_id")
+    assert sensor.extra_state_attributes == {}
+
+
+def test_avg_sleep_stress_sensor() -> None:
+    """Average sleep stress exposes Garmin's qualifier and optimal range."""
+    coordinator = MagicMock()
+    coordinator.data = {
+        "avgSleepStress": 21.0,
+        "sleepScores": {
+            "stress": {"qualifierKey": "FAIR", "optimalStart": 0.0, "optimalEnd": 15.0}
+        },
+    }
+    description = next(d for d in SLEEP_SENSORS if d.key == "avgSleepStress")
+    sensor = GarminConnectSensor(coordinator, description, "test_entry_id")
+    assert sensor.native_value == 21.0
+    assert sensor.extra_state_attributes == {
+        "qualifier": "fair",
+        "optimal_start": 0.0,
+        "optimal_end": 15.0,
+    }
+
+
+def test_avg_sleep_stress_samples() -> None:
+    """The overnight stress samples ride along as an attribute, live-only."""
+    samples = [
+        {"time": datetime.datetime(2026, 4, 11, 22, 0, tzinfo=datetime.UTC), "value": 18.0},
+        {"time": datetime.datetime(2026, 4, 11, 22, 3, tzinfo=datetime.UTC), "value": 22.0},
+    ]
+    coordinator = MagicMock()
+    coordinator.data = {"avgSleepStress": 21.0, "sleepStress": samples}
+    description = next(d for d in SLEEP_SENSORS if d.key == "avgSleepStress")
+    sensor = GarminConnectSensor(coordinator, description, "test_entry_id")
+    assert sensor.extra_state_attributes == {"sleep_stress": samples}
+    assert "sleep_stress" in sensor._unrecorded_attributes
+
+
+def test_sleep_night_sensors() -> None:
+    """Awakenings, restless moments, sleep heart rate and overnight body battery change."""
+    coordinator = MagicMock()
+    coordinator.data = {
+        "awakeCount": 2,
+        "restlessMomentsCount": 50,
+        "avgSleepHeartRate": 58.0,
+        "sleepBodyBatteryChange": 48,
+    }
+    for key, expected in coordinator.data.items():
+        description = next(d for d in SLEEP_SENSORS if d.key == key)
+        sensor = GarminConnectSensor(coordinator, description, "test_entry_id")
+        assert sensor.native_value == expected
+        assert description.preserve_value
 
 
 def test_nutrition_sensors_unknown_when_feature_unavailable() -> None:
@@ -394,6 +544,32 @@ def test_weight_uses_pre_computed_kg_key() -> None:
     assert sensor.native_value == 75.0
 
 
+def test_weight_measurement_time_is_the_utc_weigh_in():
+    """measurement_time comes from timestampGMT, not from the local wall clock in 'date'."""
+    desc = next(d for d in BODY_COMPOSITION_SENSORS if d.key == "weightKg")
+    coord = MagicMock()
+    coord.data = mock_body_data()
+    sensor = GarminConnectSensor(coord, desc, "entry_id")
+    assert sensor.extra_state_attributes == {
+        "measurement_time": datetime.datetime(2026, 10, 18, 13, 13, 52, tzinfo=datetime.UTC)
+    }
+
+
+@pytest.mark.parametrize(
+    "timestamp_gmt",
+    [None, "1792329232000", True, 1e18],
+    ids=["missing", "string", "bool", "out_of_range"],
+)
+def test_weight_without_usable_timestamp_has_no_measurement_time(timestamp_gmt):
+    """A weigh-in without a usable timestampGMT leaves the attribute out instead of raising."""
+    desc = next(d for d in BODY_COMPOSITION_SENSORS if d.key == "weightKg")
+    coord = MagicMock()
+    coord.data = {"weightKg": 75.0, "timestampGMT": timestamp_gmt}
+    sensor = GarminConnectSensor(coord, desc, "entry_id")
+    assert sensor.extra_state_attributes == {}
+    assert sensor.native_value == 75.0
+
+
 def test_badges_returns_count() -> None:
     """badges sensor must return the number of badges."""
     desc = next(d for d in GOALS_SENSORS if d.key == "badges")
@@ -520,6 +696,38 @@ def test_lifetime_totals_missing_is_none() -> None:
     coord = MagicMock()
     coord.data = {"lifetimeTotals": {}}
     assert GarminConnectSensor(coord, desc, "entry_id").native_value is None
+
+
+def test_fitness_age_vigorous_factors():
+    """Vigorous days/minutes per week come from fitness-age's components."""
+    coord = MagicMock()
+    coord.data = mock_body_data()
+
+    def sensor(key: str) -> GarminConnectSensor:
+        desc = next(d for d in FITNESS_AGE_SENSORS if d.key == key)
+        return GarminConnectSensor(coord, desc, "entry_id")
+
+    days = sensor("vigorousDaysAvg")
+    assert days.native_value == 0.3
+    assert days.extra_state_attributes == {
+        "target": 3,
+        "potential_fitness_age": 54.0,
+        "weeks_averaged": 6,
+        "stale": False,
+    }
+    minutes = sensor("vigorousMinutesAvg")
+    assert minutes.native_value == 5.6
+    assert minutes.extra_state_attributes["target"] == 75
+
+
+def test_fitness_age_vigorous_factors_missing():
+    desc = next(d for d in FITNESS_AGE_SENSORS if d.key == "vigorousDaysAvg")
+    coord = MagicMock()
+    for data in ({}, {"components": None}, {"components": {"vigorousDaysAvg": None}}):
+        coord.data = data
+        sensor = GarminConnectSensor(coord, desc, "entry_id")
+        assert sensor.native_value is None
+        assert sensor.extra_state_attributes == {}
 
 
 def test_bp_systolic_value_and_attributes() -> None:
@@ -1493,3 +1701,36 @@ def test_empty_gear_list_does_not_prune() -> None:
     coordinators.gear.data = None
     _listener(coordinators.gear)()
     registry.async_remove.assert_not_called()
+
+
+def test_scheduled_workout_sensors_add_steps_summary():
+    """Today's and the next workout expose a readable line per step."""
+    data = mock_activity_data()
+    steps = [
+        {"stepOrder": 1, "stepType": "warmup", "endCondition": "lap.button"},
+        {
+            "stepOrder": 2,
+            "stepType": "interval",
+            "endCondition": "distance",
+            "endConditionValue": 4828.02,
+            "targetType": "heart.rate.zone",
+            "targetValueOne": 141.0,
+            "targetValueTwo": 159.0,
+        },
+    ]
+    data["todayScheduledWorkout"]["workoutSteps"] = steps
+    data["nextScheduledWorkout"]["workoutSteps"] = steps
+
+    for key in ("todayScheduledWorkout", "nextScheduledWorkout"):
+        desc = next(d for d in ACTIVITY_TRACKING_SENSORS if d.key == key)
+        attrs = desc.attributes_fn(data)
+        assert attrs["workoutSteps"] == steps
+        assert attrs["steps_summary"] == [
+            "Warm-up until lap press",
+            "Interval 4.83 km @ 141–159 bpm",
+        ]
+
+
+def test_scheduled_workout_without_steps_has_no_summary():
+    desc = next(d for d in ACTIVITY_TRACKING_SENSORS if d.key == "todayScheduledWorkout")
+    assert "steps_summary" not in desc.attributes_fn(mock_activity_data())

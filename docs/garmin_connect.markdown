@@ -70,6 +70,22 @@ This integration provides **110+ sensors** covering various health and fitness m
 - **HRV Last Night Average** - Last night's HRV (ms)
 - **HRV Baseline** - Personal HRV baseline with range
 
+**Latest Heart Rate** is an additional sensor, disabled by default. It reports
+Garmin's newest uploaded sample, not a live reading, with its `measurement_time`.
+Its extra request is made only while enabled and is cached until a new watch sync.
+
+### Yesterday's final summary
+
+The additional Yesterday sensors cover average/max stress, stress/high-stress/rest
+durations, Body Battery highest/lowest/charged/drained, resting heart rate,
+intensity minutes and active calories. They are disabled by default. Enable the
+ones you want in the integration's entity settings. With at least one enabled,
+the summary is refreshed when the Garmin calendar day changes or a new watch sync
+lands; with none enabled, this extra summary is not fetched. The Garmin client
+resolves the local calendar day, with the Home Assistant time zone as fallback.
+This helps recover late uploads, but does not rewrite past Recorder history.
+Use `garmin_connect.get_day_summary` to request another date.
+
 ### Stress & Recovery
 
 - **Avg/Max Stress Level** - Stress measurements (0-100)
@@ -83,6 +99,16 @@ This integration provides **110+ sensors** covering various health and fitness m
 - **Deep Sleep** - Time in deep sleep
 - **Light Sleep** - Time in light sleep
 - **REM Sleep** - Time in REM sleep
+
+Sleep Score also exposes overall/component qualifiers and Garmin feedback keys.
+Additional sensors are **Average Sleep Stress**, **Sleep Awakenings**, **Sleep
+Restless Moments**, **Average Sleep Heart Rate** (bpm) and **Sleep Body Battery
+Change** (%). These retain the last known value when a later poll omits it;
+when provenance is supplied, the original source date is retained too.
+Average Sleep Stress includes `qualifier`, `optimal_start`, `optimal_end` and
+live `sleep_stress` samples as `[{time, value}]`, with aware datetime timestamps.
+The samples are excluded from Recorder attributes, while the scalar and small
+attributes remain eligible for recording.
 
 ### Body Battery
 
@@ -103,7 +129,7 @@ This integration provides **110+ sensors** covering various health and fitness m
 
 ### Body Composition
 
-- **Weight** - Body weight
+- **Weight** - Body weight in kg; `measurement_time` is the UTC weigh-in timestamp
 - **BMI** - Body Mass Index
 - **Body Fat/Water** - Percentage measurements
 - **Muscle/Bone Mass** - Mass measurements
@@ -136,10 +162,29 @@ This integration provides **110+ sensors** covering various health and fitness m
 - **Lactate Threshold HR** - Lactate threshold heart rate (bpm)
 - **Lactate Threshold Speed** - Lactate threshold running pace (m/s)
 
+**Vigorous Days / Vigorous Minutes per Week** expose Fitness Age activity factors,
+with `target`, `potential_fitness_age`, `weeks_averaged` and `stale` attributes.
+
+### Lifetime totals
+
+Lifetime Steps, Distance, Calories and Active Days remain enabled by default in
+this fork. Existing entity enablement is preserved. Totals are requested only
+while a lifetime sensor is enabled. If Garmin hides them, the sensors become
+unavailable and a Repairs issue explains how to show Lifetime Totals in Garmin's
+Public Profile settings; the profile itself may remain visible to Only me.
+
 ### Workouts
 
 - **Last Workout** - Name of most recent scheduled workout
 - **Last Workouts** - Count of recent workouts (details in attributes)
+
+Today's Scheduled Workout and Next Scheduled Workout expose the training-calendar
+session, including detailed `workoutSteps` and readable `steps_summary` when
+Garmin provides them. Next Scheduled Workout also includes lightweight `upcoming`
+calendar entries. The raw `workoutSteps` remain available live but are excluded
+from Recorder attributes; summaries and other small attributes remain eligible
+for recording. See the [README](../README.md#workouts) for step targets and workout
+actions. Large remaining attributes can still exceed Recorder's 16 KiB limit.
 
 ### Menstrual Cycle Tracking
 
@@ -155,6 +200,21 @@ This integration provides **110+ sensors** covering various health and fitness m
 Gear sensors are dynamically created for each piece of equipment registered in Garmin Connect (shoes, bikes, etc.). They track total distance and usage statistics.
 
 ## Actions
+
+### Get day summary
+
+`garmin_connect.get_day_summary` is a response-only action. Supply required `date`
+(`YYYY-MM-DD`) and optional `entity_id` to select a Garmin account. It returns
+`date`, `summary` (mapped daily fields plus `totalSteps` and
+`totalDistanceMeters`) and `raw` (Garmin's daily summary). This reads a date;
+it does not insert or backfill Home Assistant Recorder rows.
+
+```yaml
+action: garmin_connect.get_day_summary
+data:
+  date: "2026-11-09"
+response_variable: day
+```
 
 ### Add body composition
 
@@ -219,6 +279,12 @@ Upload an activity file (FIT, GPX, TCX) to Garmin Connect.
 ## Data updates
 
 Data is polled from Garmin Connect every 5 minutes. Due to API rate limits, more frequent polling is not recommended.
+
+Optional coordinator data is fetched only while an enabled entity or other
+listener uses it. Latest-heart-rate and yesterday-summary fetches are opt-in;
+lifetime totals follow the lifetime sensors' enabled state. Region changes require
+reconfiguration with a fresh login because tokens are region-bound; changing the
+scan interval preserves the existing region.
 
 ## MFA Support
 

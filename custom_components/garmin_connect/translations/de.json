@@ -70,12 +70,10 @@
     "step": {
       "init": {
         "data": {
-          "scan_interval": "Aktualisierungsintervall (Sekunden)",
-          "is_cn": "Garmin Connect China verwenden (cn.garmin.com)"
+          "scan_interval": "Aktualisierungsintervall (Sekunden)"
         },
         "data_description": {
-          "scan_interval": "Wie oft Daten von Garmin Connect abgerufen werden (60–3600 Sekunden)",
-          "is_cn": "Aktivieren für Konten, die auf der chinesischen Garmin-Connect-Plattform registriert sind"
+          "scan_interval": "Wie oft Daten von Garmin Connect abgerufen werden (60–3600 Sekunden)"
         },
         "description": "Konfiguriere die Einstellungen deiner Garmin-Connect-Integration.",
         "title": "Garmin-Connect-Optionen"
@@ -97,6 +95,11 @@
       "avg_altitude": { "name": "Durchschnittliche Höhe" },
       "avg_sleep_respiration": { "name": "Durchschnittliche Atemfrequenz im Schlaf" },
       "skin_temp_change": { "name": "Hauttemperaturänderung" },
+      "avg_sleep_stress": { "name": "Durchschnittlicher Stress im Schlaf" },
+      "sleep_awakenings": { "name": "Aufwachphasen im Schlaf" },
+      "sleep_restless_moments": { "name": "Unruhige Momente im Schlaf" },
+      "avg_sleep_heart_rate": { "name": "Durchschnittliche Herzfrequenz im Schlaf" },
+      "sleep_body_battery_change": { "name": "Body Battery Veränderung im Schlaf" },
       "avg_solar_intensity": { "name": "Durchschnittliche Solarintensität" },
       "avg_spo2": { "name": "Durchschnittliche SpO2" },
       "avg_stress_level": { "name": "Durchschnittliches Stresslevel" },
@@ -126,6 +129,8 @@
       "devices": { "name": "Geräte" },
       "endurance_score": { "name": "Endurance Score" },
       "fitness_age": { "name": "Fitnessalter" },
+      "vigorous_days_avg": { "name": "Intensive Tage pro Woche" },
+      "vigorous_minutes_avg": { "name": "Intensive Minuten pro Woche" },
       "floors_ascended": { "name": "Etagen aufwärts" },
       "floors_ascended_distance": { "name": "Aufstiegshöhe" },
       "floors_ascended_goal": { "name": "Ziel Etagen aufwärts" },
@@ -210,6 +215,7 @@
       "rest_stress_duration": { "name": "Dauer Ruhestress" },
       "rest_stress_percentage": { "name": "Anteil Ruhestress" },
       "resting_heart_rate": { "name": "Ruhepuls" },
+      "latest_heart_rate": { "name": "Letzte Herzfrequenz" },
       "sedentary_time": { "name": "Inaktive Zeit" },
       "sleep_need": { "name": "Schlafbedarf" },
       "bedtime": { "name": "Schlafenszeit" },
@@ -259,7 +265,19 @@
       "wellness_end_time": { "name": "Wellness Endzeit" },
       "wellness_start_time": { "name": "Wellness Startzeit" },
       "yesterday_distance": { "name": "Distanz gestern" },
-      "yesterday_steps": { "name": "Schritte gestern" }
+      "yesterday_steps": { "name": "Schritte gestern" },
+      "yesterday_active_calories": { "name": "Aktive Kalorien gestern" },
+      "yesterday_avg_stress_level": { "name": "Durchschnittliches Stresslevel gestern" },
+      "yesterday_max_stress_level": { "name": "Maximales Stresslevel gestern" },
+      "yesterday_stress_duration": { "name": "Stressdauer gestern" },
+      "yesterday_high_stress_duration": { "name": "Dauer hoher Stress gestern" },
+      "yesterday_rest_stress_duration": { "name": "Dauer Ruhestress gestern" },
+      "yesterday_body_battery_highest": { "name": "Body Battery Höchstwert gestern" },
+      "yesterday_body_battery_lowest": { "name": "Body Battery Tiefstwert gestern" },
+      "yesterday_body_battery_charged": { "name": "Body Battery geladen gestern" },
+      "yesterday_body_battery_drained": { "name": "Body Battery verbraucht gestern" },
+      "yesterday_resting_heart_rate": { "name": "Ruhepuls gestern" },
+      "yesterday_intensity_minutes": { "name": "Intensitätsminuten gestern" }
     }
   },
   "services": {
@@ -405,6 +423,14 @@
         "gear_uuid": { "name": "Ausrüstungs-UUID", "description": "Die UUID der hinzuzufügenden Ausrüstung." },
         "entity_id": { "name": "Ausrüstungs-Sensor", "description": "Alternative zur Ausrüstungs-UUID — wähle eine Ausrüstungs-Sensor-Entität." }
       }
+    },
+    "get_day_summary": {
+      "name": "Tageszusammenfassung abrufen",
+      "description": "Ruft die Tageszusammenfassung (Schritte, Stress, Body Battery, Ruhepuls, Intensitätsminuten) für ein beliebiges Datum von Garmin Connect ab und gibt sie zurück.",
+      "fields": {
+        "date": { "name": "Datum", "description": "Der abzurufende Tag." },
+        "entity_id": { "name": "Garmin Connect-Entität", "description": "Optionale Garmin Connect-Entität, deren Konto gelesen wird." }
+      }
     }
   },
   "exceptions": {
@@ -432,12 +458,17 @@
     "ambiguous_account": { "message": "Es sind mehrere Garmin-Connect-Konten eingerichtet. Gib eine entity_id an, um das gewünschte Konto auszuwählen." },
     "set_active_gear_failed": { "message": "Aktive Ausrüstung konnte nicht festgelegt werden: {error}" },
     "unsupported_file_format": { "message": "Nicht unterstützte Aktivitätsdatei {file_path}. Unterstützte Formate: {formats}" },
-    "upload_activity_failed": { "message": "Aktivität konnte nicht hochgeladen werden: {error}" }
+    "upload_activity_failed": { "message": "Aktivität konnte nicht hochgeladen werden: {error}" },
+    "get_day_summary_failed": { "message": "Tageszusammenfassung konnte nicht abgerufen werden: {error}" }
   },
   "issues": {
     "connect_plus_required": {
       "title": "Ernährungsdaten erfordern Garmin Connect+",
       "description": "Die Ernährungssensoren für {title} sind nicht verfügbar, weil dein Garmin-Konto kein aktives Connect+-Abonnement hat. Schliesse in der Garmin-Connect-App ein Connect+-Abonnement ab, um die Ernährungserfassung zu aktivieren, oder deaktiviere die Ernährungssensoren dieser Integration."
+    },
+    "lifetime_totals_hidden": {
+      "title": "Garmin verbirgt deine Gesamtdaten",
+      "description": "Garmin Connect verweigert die Gesamtdaten für {title}, daher sind die Sensoren für Schritte, Distanz, Kalorien und aktive Tage gesamt nicht verfügbar. Garmin liefert sie nur, wenn sie in deinem Profil angezeigt werden: Öffne in Garmin Connect im Web Kontoeinstellungen → Öffentliches Profil und aktiviere unter „Im Profil anzeigen“ die Gesamtdaten. Dein Profil kann für „Nur ich“ sichtbar bleiben, es wird also nichts öffentlich. Die Sensoren werden bei der nächsten Aktualisierung aktualisiert. Wenn du diese Sensoren nicht möchtest, deaktiviere sie stattdessen."
     }
   }
 }

@@ -70,12 +70,10 @@
     "step": {
       "init": {
         "data": {
-          "scan_interval": "Interwał aktualizacji (sekundy)",
-          "is_cn": "Użyj Garmin Connect China (cn.garmin.com)"
+          "scan_interval": "Interwał aktualizacji (sekundy)"
         },
         "data_description": {
-          "scan_interval": "Jak często pobierać dane z Garmin Connect (60–3600 sekund)",
-          "is_cn": "Włącz dla kont zarejestrowanych na chińskiej platformie Garmin Connect"
+          "scan_interval": "Jak często pobierać dane z Garmin Connect (60–3600 sekund)"
         },
         "description": "Skonfiguruj ustawienia integracji Garmin Connect.",
         "title": "Opcje Garmin Connect"
@@ -185,6 +183,12 @@
       },
       "fitness_age": {
         "name": "Wiek fitness"
+      },
+      "vigorous_days_avg": {
+        "name": "Dni intensywnej aktywności na tydzień"
+      },
+      "vigorous_minutes_avg": {
+        "name": "Minuty intensywnej aktywności na tydzień"
       },
       "floors_ascended": {
         "name": "Piętra w górę"
@@ -426,6 +430,7 @@
       "resting_heart_rate": {
         "name": "Tętno spoczynkowe"
       },
+      "latest_heart_rate": { "name": "Ostatnie tętno" },
       "sedentary_time": {
         "name": "Czas siedzący"
       },
@@ -497,6 +502,11 @@
       },
       "last_activity_route": { "name": "Trasa ostatniej aktywności" },
       "skin_temp_change": { "name": "Zmiana temperatury skóry" },
+      "avg_sleep_stress": { "name": "Średni stres podczas snu" },
+      "sleep_awakenings": { "name": "Przebudzenia podczas snu" },
+      "sleep_restless_moments": { "name": "Niespokojne momenty podczas snu" },
+      "avg_sleep_heart_rate": { "name": "Średnie tętno podczas snu" },
+      "sleep_body_battery_change": { "name": "Zmiana Body Battery podczas snu" },
       "avg_sleep_respiration": { "name": "Średnie tempo oddechu podczas snu" },
       "avg_solar_intensity": { "name": "Średnie natężenie słoneczne" },
       "connected_sensors": { "name": "Podłączone czujniki" },
@@ -574,7 +584,19 @@
       },
       "yesterday_steps": {
         "name": "Wczorajsze kroki"
-      }
+      },
+      "yesterday_active_calories": { "name": "Kalorie aktywne wczoraj" },
+      "yesterday_avg_stress_level": { "name": "Średni poziom stresu wczoraj" },
+      "yesterday_max_stress_level": { "name": "Maks. poziom stresu wczoraj" },
+      "yesterday_stress_duration": { "name": "Czas stresu wczoraj" },
+      "yesterday_high_stress_duration": { "name": "Czas wysokiego stresu wczoraj" },
+      "yesterday_rest_stress_duration": { "name": "Czas stresu w spoczynku wczoraj" },
+      "yesterday_body_battery_highest": { "name": "Body Battery najwyższa wczoraj" },
+      "yesterday_body_battery_lowest": { "name": "Body Battery najniższa wczoraj" },
+      "yesterday_body_battery_charged": { "name": "Body Battery naładowana wczoraj" },
+      "yesterday_body_battery_drained": { "name": "Body Battery rozładowana wczoraj" },
+      "yesterday_resting_heart_rate": { "name": "Tętno spoczynkowe wczoraj" },
+      "yesterday_intensity_minutes": { "name": "Minuty intensywności wczoraj" }
     }
   },
   "services": {
@@ -836,6 +858,14 @@
           "description": "Alternatywa dla gear_uuid — wybierz encję czujnika sprzętu."
         }
       }
+    },
+    "get_day_summary": {
+      "name": "Pobierz podsumowanie dnia",
+      "description": "Pobiera z Garmin Connect podsumowanie dnia (kroki, stres, Body Battery, tętno spoczynkowe, minuty intensywności) dla dowolnej daty i je zwraca.",
+      "fields": {
+        "date": { "name": "Data", "description": "Dzień do pobrania." },
+        "entity_id": { "name": "Encja Garmin Connect", "description": "Opcjonalna encja Garmin Connect, z której konta odczytać dane." }
+      }
     }
   },
   "exceptions": {
@@ -890,6 +920,17 @@
     "unsupported_file_format": { "message": "Nieobsługiwany plik aktywności {file_path}. Obsługiwane formaty: {formats}" },
     "upload_activity_failed": {
       "message": "Nie udało się przesłać aktywności: {error}"
+    },
+    "get_day_summary_failed": { "message": "Nie udało się pobrać podsumowania dnia: {error}" }
+  },
+  "issues": {
+    "connect_plus_required": {
+      "title": "Dane o odżywianiu wymagają Garmin Connect+",
+      "description": "Czujniki odżywiania dla {title} są niedostępne, ponieważ Twoje konto Garmin nie ma aktywnej subskrypcji Connect+. Wykup Connect+ w aplikacji Garmin Connect, aby włączyć rejestrowanie posiłków, lub wyłącz czujniki odżywiania tej integracji."
+    },
+    "lifetime_totals_hidden": {
+      "title": "Garmin ukrywa Twoje dane łączne",
+      "description": "Garmin Connect odmawia danych łącznych dla {title}, dlatego czujniki łącznych kroków, dystansu, kalorii i aktywnych dni są niedostępne. Garmin udostępnia je tylko wtedy, gdy są pokazywane w Twoim profilu: w Garmin Connect w przeglądarce otwórz Ustawienia konta → Profil publiczny i w sekcji „Pokaż w profilu” włącz dane łączne. Profil może pozostać widoczny tylko dla Ciebie, więc nic nie staje się publiczne. Czujniki zaktualizują się przy następnym odświeżeniu. Jeśli nie chcesz tych czujników, wyłącz je."
     }
   }
 }

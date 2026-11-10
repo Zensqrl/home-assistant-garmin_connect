@@ -15,9 +15,13 @@ from custom_components.garmin_connect.const import (
     CONF_TOKEN,
 )
 from custom_components.garmin_connect.coordinator import (
+    LATEST_HEART_RATE_CONTEXT,
+    LIFETIME_CONTEXT,
+    YESTERDAY_CONTEXT,
     BodyCoordinator,
     CoreCoordinator,
     GearCoordinator,
+    GoalsCoordinator,
     NutritionCoordinator,
 )
 
@@ -67,13 +71,8 @@ async def test_refresh_external_cancellation_propagates(hass, mock_config_entry,
         await coordinator._async_update_data()
 
 
-def _make_coordinator(client: AsyncMock, *, nutrition_enabled: bool = True) -> NutritionCoordinator:
-    """Build a NutritionCoordinator with mocked hass/entry/auth.
-
-    `nutrition_enabled` stubs out the entity-registry lookup so tests don't need a
-    real registry - defaults to True (opted in) since most tests exercise the
-    empty-day/threshold logic that only runs once a user has enabled the feature.
-    """
+def _make_coordinator(client: AsyncMock) -> NutritionCoordinator:
+    """Build a NutritionCoordinator with mocked hass/entry/auth."""
     hass = MagicMock()
     entry = MagicMock()
     entry.entry_id = "test_entry_id"
@@ -83,7 +82,6 @@ def _make_coordinator(client: AsyncMock, *, nutrition_enabled: bool = True) -> N
     auth = MagicMock()
     coordinator = NutritionCoordinator(hass, entry, client, auth)
     coordinator._update_tokens_if_changed = MagicMock()
-    coordinator._has_enabled_nutrition_entity = MagicMock(return_value=nutrition_enabled)
     return coordinator
 
 
@@ -187,62 +185,6 @@ async def test_issue_cleared_once_data_returns() -> None:
         assert coordinator._ever_had_data is True
 
 
-async def test_no_issue_when_nutrition_never_enabled() -> None:
-    """Users who never enable the (disabled-by-default) nutrition sensors are never nagged.
-
-    NutritionCoordinator polls unconditionally regardless of entity enablement, so most
-    installs have no Connect+ and would hit the empty-day threshold - this must not
-    surface a repair issue unless the user actually opted into the feature.
-    """
-    coordinator = _make_coordinator(_make_client(empty=True), nutrition_enabled=False)
-    with patch("custom_components.garmin_connect.coordinator.ir") as mock_ir:
-        for day in (_DAY_1, _DAY_2, _DAY_3, _DAY_4, date(2026, 1, 5)):
-            day_patch = _mock_today(day)
-            try:
-                await coordinator._async_update_data()
-            finally:
-                day_patch.stop()
-
-        mock_ir.async_create_issue.assert_not_called()
-        assert coordinator._empty_days == 0
-
-
-async def test_issue_starts_fresh_debounce_after_enabling() -> None:
-    """Enabling nutrition sensors after a long silent gap starts a clean 3-day window.
-
-    A streak that accumulated while the feature was disabled must not immediately
-    fire on the first poll after the user opts in.
-    """
-    coordinator = _make_coordinator(_make_client(empty=True), nutrition_enabled=False)
-    with patch("custom_components.garmin_connect.coordinator.ir") as mock_ir:
-        for day in (_DAY_1, _DAY_2, _DAY_3, _DAY_4):
-            day_patch = _mock_today(day)
-            try:
-                await coordinator._async_update_data()
-            finally:
-                day_patch.stop()
-        mock_ir.async_create_issue.assert_not_called()
-
-        coordinator._has_enabled_nutrition_entity = MagicMock(return_value=True)
-        day_5 = date(2026, 1, 5)
-        day_patch = _mock_today(day_5)
-        try:
-            await coordinator._async_update_data()
-        finally:
-            day_patch.stop()
-        assert coordinator._empty_days == 1
-        mock_ir.async_create_issue.assert_not_called()
-
-        for day in (date(2026, 1, 6), date(2026, 1, 7)):
-            day_patch = _mock_today(day)
-            try:
-                await coordinator._async_update_data()
-            finally:
-                day_patch.stop()
-
-        mock_ir.async_create_issue.assert_called_once()
-
-
 # ── Base coordinator: error mapping and token persistence ────────────────────
 
 
@@ -341,3 +283,238 @@ def test_coordinator_names_use_data_domain() -> None:
     body = BodyCoordinator(coordinator.hass, coordinator.config_entry, client, coordinator.auth)
     assert coordinator.name == "garmin_connect_core"
     assert body.name == "garmin_connect_body"
+
+
+# ── Yesterday's final summary ────────────────────────────────────────────────
+
+_RAW_DAY = {
+    "calendarDate": "2026-10-17",
+    "averageStressLevel": 42,
+    "maxStressLevel": 97,
+    "stressDuration": 30000,
+    "highStressDuration": 3600,
+    "restStressDuration": 24000,
+    "bodyBatteryHighestValue": 89,
+    "bodyBatteryLowestValue": 8,
+    "bodyBatteryChargedValue": 70,
+    "bodyBatteryDrainedValue": 81,
+    "restingHeartRate": 52,
+    "moderateIntensityMinutes": 10,
+    "vigorousIntensityMinutes": 25,
+    "activeKilocalories": 610,
+    "totalSteps": 6909,
+}
+
+
+def test_summarize_day_maps_fields() -> None:
+    from custom_components.garmin_connect.coordinator import summarize_day
+
+    out = summarize_day(_RAW_DAY, date(2026, 10, 17))
+    assert out["yesterdayDate"] == "2026-10-17"
+    assert out["yesterdayAverageStressLevel"] == 42
+    assert out["yesterdayStressMinutes"] == 500
+    assert out["yesterdayHighStressMinutes"] == 60
+    assert out["yesterdayBodyBatteryHighest"] == 89
+    assert out["yesterdayIntensityMinutes"] == 60
+    assert out["yesterdayRestingHeartRate"] == 52
+
+
+def test_summarize_day_drops_garmin_no_data_stress() -> None:
+    from custom_components.garmin_connect.coordinator import summarize_day
+
+    out = summarize_day({"averageStressLevel": -1, "maxStressLevel": -2}, date(2026, 10, 17))
+    assert out["yesterdayAverageStressLevel"] is None
+    assert out["yesterdayMaxStressLevel"] is None
+    assert out["yesterdayIntensityMinutes"] is None
+    assert out["yesterdayDate"] == "2026-10-17"
+
+
+def _yesterday_client(today: date, last_sync: str = "s1") -> AsyncMock:
+    client = AsyncMock()
+    client.today = MagicMock(return_value=today)
+    client.fetch_core_data = AsyncMock(
+        side_effect=lambda **_: {"totalSteps": 1, "lastSyncTimestamp": client.last_sync}
+    )
+    client.last_sync = last_sync
+    client._get_user_summary_raw = AsyncMock(return_value=dict(_RAW_DAY))
+    return client
+
+
+def _with_yesterday_sensor(coordinator: CoreCoordinator) -> CoreCoordinator:
+    """Act as if an enabled yesterday sensor listens to the coordinator."""
+    coordinator.async_contexts = lambda: iter([YESTERDAY_CONTEXT])  # type: ignore[method-assign]
+    return coordinator
+
+
+async def test_core_skips_yesterday_without_enabled_sensor():
+    client = _yesterday_client(date(2026, 10, 18))
+    coordinator = _make_base(client)
+
+    data = await coordinator._async_update_data()
+    assert data == {"totalSteps": 1, "lastSyncTimestamp": "s1"}
+    client._get_user_summary_raw.assert_not_awaited()
+
+
+async def test_core_adds_yesterday_and_caches():
+    client = _yesterday_client(date(2026, 10, 18))
+    coordinator = _with_yesterday_sensor(_make_base(client))
+
+    data = await coordinator._async_update_data()
+    assert data["totalSteps"] == 1
+    assert data["yesterdayAverageStressLevel"] == 42
+    client._get_user_summary_raw.assert_awaited_once_with(date(2026, 10, 17))
+
+    # Same day, same sync: no second call, values kept.
+    data = await coordinator._async_update_data()
+    assert data["yesterdayAverageStressLevel"] == 42
+    assert client._get_user_summary_raw.await_count == 1
+
+
+async def test_core_refetches_yesterday_on_new_day():
+    client = _yesterday_client(date(2026, 10, 18))
+    coordinator = _with_yesterday_sensor(_make_base(client))
+    await coordinator._async_update_data()
+
+    client.today.return_value = date(2026, 10, 19)
+    await coordinator._async_update_data()
+    client._get_user_summary_raw.assert_awaited_with(date(2026, 10, 18))
+    assert client._get_user_summary_raw.await_count == 2
+
+
+async def test_core_retries_yesterday_after_empty_summary():
+    client = _yesterday_client(date(2026, 10, 18))
+    client._get_user_summary_raw.return_value = {}
+    coordinator = _with_yesterday_sensor(_make_base(client))
+
+    data = await coordinator._async_update_data()
+    assert "yesterdayAverageStressLevel" not in data
+
+    client._get_user_summary_raw.return_value = dict(_RAW_DAY)
+    data = await coordinator._async_update_data()
+    assert data["yesterdayAverageStressLevel"] == 42
+    assert client._get_user_summary_raw.await_count == 2
+
+
+async def test_core_drops_old_yesterday_when_new_day_fetch_fails():
+    """After midnight a failed fetch must not show the day before as yesterday."""
+    client = _yesterday_client(date(2026, 10, 18))
+    coordinator = _with_yesterday_sensor(_make_base(client))
+    await coordinator._async_update_data()
+
+    client.today.return_value = date(2026, 10, 19)
+    client._get_user_summary_raw.side_effect = GarminConnectError("503")
+    data = await coordinator._async_update_data()
+    assert "yesterdayAverageStressLevel" not in data
+
+    # The next poll retries.
+    client._get_user_summary_raw.side_effect = None
+    data = await coordinator._async_update_data()
+    assert data["yesterdayAverageStressLevel"] == 42
+    client._get_user_summary_raw.assert_awaited_with(date(2026, 10, 18))
+
+
+async def test_core_refetches_yesterday_on_new_sync() -> None:
+    client = _yesterday_client(date(2026, 10, 18))
+    coordinator = _with_yesterday_sensor(_make_base(client))
+    await coordinator._async_update_data()
+
+    client.last_sync = "s2"  # the watch uploaded (e.g. at 2:25 am)
+    client._get_user_summary_raw.return_value = {**_RAW_DAY, "averageStressLevel": 44}
+    data = await coordinator._async_update_data()
+    assert data["yesterdayAverageStressLevel"] == 44
+    assert client._get_user_summary_raw.await_count == 2
+    client._get_user_summary_raw.assert_awaited_with(date(2026, 10, 17))
+
+
+async def test_core_survives_yesterday_failure() -> None:
+    client = _yesterday_client(date(2026, 10, 18))
+    client._get_user_summary_raw = AsyncMock(side_effect=GarminConnectError("503"))
+    coordinator = _with_yesterday_sensor(_make_base(client))
+
+    data = await coordinator._async_update_data()
+    assert data == {"totalSteps": 1, "lastSyncTimestamp": "s1"}
+
+
+async def test_get_day_returns_summary_and_raw() -> None:
+    client = _yesterday_client(date(2026, 10, 18))
+    coordinator = _make_base(client)
+
+    out = await coordinator.async_get_day(date(2026, 10, 17))
+    assert out["summary"]["averageStressLevel"] == 42
+    assert out["summary"]["date"] == "2026-10-17"
+    assert out["summary"]["totalSteps"] == 6909
+    assert out["raw"]["maxStressLevel"] == 97
+
+
+# ── Latest heart rate ────────────────────────────────────────────────────────
+
+
+async def test_core_asks_for_latest_heart_rate_only_for_enabled_sensor():
+    client = _yesterday_client(date(2026, 10, 18))
+    coordinator = _make_base(client)
+    await coordinator._async_update_data()
+    client.fetch_core_data.assert_awaited_with(latest_heart_rate=False)
+
+    coordinator.async_contexts = lambda: iter([LATEST_HEART_RATE_CONTEXT])  # type: ignore[method-assign]
+    await coordinator._async_update_data()
+    client.fetch_core_data.assert_awaited_with(latest_heart_rate=True)
+    client._get_user_summary_raw.assert_not_awaited()
+
+
+# ── Lifetime totals ──────────────────────────────────────────────────────────
+
+
+def _make_goals(client: AsyncMock) -> GoalsCoordinator:
+    entry = MagicMock()
+    entry.entry_id = "test_entry_id"
+    entry.title = "runner@example.com"
+    entry.options = {}
+    entry.data = dict(ENTRY_DATA)
+    auth = MagicMock()
+    auth.di_token = None  # nothing to persist
+    return GoalsCoordinator(MagicMock(), entry, client, auth)
+
+
+def _goals_client(*, hidden: bool) -> AsyncMock:
+    client = AsyncMock()
+    client.fetch_goals_data = AsyncMock(
+        return_value={"lifetimeTotals": {}, "lifetimeTotalsHidden": hidden}
+    )
+    return client
+
+
+async def test_goals_skip_lifetime_totals_without_enabled_sensor():
+    client = _goals_client(hidden=False)
+    with patch("custom_components.garmin_connect.coordinator.ir"):
+        await _make_goals(client)._async_update_data()
+    client.fetch_goals_data.assert_awaited_once_with(lifetime_totals=False)
+
+
+async def test_goals_fetch_lifetime_totals_for_enabled_sensor():
+    client = _goals_client(hidden=False)
+    coordinator = _make_goals(client)
+    coordinator.async_contexts = lambda: iter([LIFETIME_CONTEXT])  # type: ignore[method-assign]
+    with patch("custom_components.garmin_connect.coordinator.ir"):
+        await coordinator._async_update_data()
+    client.fetch_goals_data.assert_awaited_once_with(lifetime_totals=True)
+
+
+async def test_goals_repair_issue_while_lifetime_totals_hidden():
+    coordinator = _make_goals(_goals_client(hidden=True))
+    with patch("custom_components.garmin_connect.coordinator.ir") as ir:
+        await coordinator._async_update_data()
+    ir.async_create_issue.assert_called_once()
+    args, kwargs = ir.async_create_issue.call_args
+    assert args[2] == "lifetime_totals_hidden_test_entry_id"
+    assert kwargs["translation_key"] == "lifetime_totals_hidden"
+    assert kwargs["translation_placeholders"] == {"title": "runner@example.com"}
+    ir.async_delete_issue.assert_not_called()
+
+
+async def test_goals_repair_issue_cleared_when_lifetime_totals_shown():
+    coordinator = _make_goals(_goals_client(hidden=False))
+    with patch("custom_components.garmin_connect.coordinator.ir") as ir:
+        await coordinator._async_update_data()
+    ir.async_create_issue.assert_not_called()
+    ir.async_delete_issue.assert_called_once()
+    assert ir.async_delete_issue.call_args.args[2] == "lifetime_totals_hidden_test_entry_id"
